@@ -8,6 +8,7 @@ import (
 	"log"
 	"neobench/pkg"
 	"neobench/pkg/workload"
+	"os"
 	"sync"
 	"time"
 )
@@ -93,7 +94,8 @@ func main() {
 	wg.Wait()
 	sLogger.Infof("Processing results..")
 
-	processResults(sLogger, *clients, resultChan)
+	exitCode := processResults(sLogger, *clients, resultChan)
+	os.Exit(exitCode)
 }
 
 func initWorkload(path string, scale int64, seed int64, driver neo4j.Driver, logger *zap.Logger) error {
@@ -135,7 +137,7 @@ func awaitCompletion(stopCh chan struct{}, deadline time.Time, sLogger *zap.Suga
 	}
 }
 
-func processResults(sLogger *zap.SugaredLogger, concurrency int, resultChan chan workerResult) {
+func processResults(sLogger *zap.SugaredLogger, concurrency int, resultChan chan workerResult) int {
 	// Collect results
 	results := make([]workerResult, 0, concurrency)
 	for i := 0; i < concurrency; i++ {
@@ -162,11 +164,12 @@ func processResults(sLogger *zap.SugaredLogger, concurrency int, resultChan chan
 	fmt.Printf("== Results ==\n")
 	if combinedHistogram == nil {
 		fmt.Printf("All workers failed.\n")
-		return
+		return 1
 	}
 	for _, bracket := range combinedHistogram.CumulativeDistribution() {
 		fmt.Printf("  %.2f: %.5fms (N=%d)\n", bracket.Quantile, float64(bracket.ValueAt)/1000, bracket.Count)
 	}
+	return 0
 }
 
 type workerResult struct {
@@ -176,6 +179,7 @@ type workerResult struct {
 }
 
 func newDriver(url, user, password string, encrypted bool) (neo4j.Driver, error) {
+	fmt.Printf("URL=%s, ENCRYPTED=%v\n", url, encrypted)
 	config := func(conf *neo4j.Config) { conf.Encrypted = encrypted }
 	return neo4j.NewDriver(url, neo4j.BasicAuth(user, password, ""), config)
 }

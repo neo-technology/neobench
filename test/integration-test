@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+
+set -o pipefail -o errtrace -o errexit -o nounset
+shopt -s inherit_errexit
+
+[[ -n "${TRACE:-}" ]] && set -o xtrace
+
+trap 'stacktrace "Error trapped rc=${PIPESTATUS[@]}, see trace above"' ERR
+
+stacktrace() {
+  local frame="${#FUNCNAME[@]}"
+  echo >&2 "Stacktrace:"
+  while [[ "${frame}" -gt 1 ]]; do
+    ((frame--))
+    echo >&2 "  File ${BASH_SOURCE[$frame]}#L${BASH_LINENO[$((frame - 1))]} (in ${FUNCNAME[$frame]}())"
+  done
+  if [[ "$#" -gt 0 ]]; then
+    echo >&2 "$1"
+  fi
+}
+
+: "${NEOBENCH_PATH:?Please set NEOBENCH_PATH to the neobench binary you want to test}"
+
+main() {
+  test_tpcb_like
+}
+
+test_tpcb_like() {
+  setup_db
+
+  "${NEOBENCH_PATH}" -i -e=false -p secret -w builtin:tpcb-like -d 5
+}
+
+setup_db() {
+  # Clean up any leaked db
+  teardown_db
+
+  # Should make this swap between docker-compose
+  # directories instead of hard-coding this command
+  local name="${NEOBENCH_CONTAINER_NAME:-neobench-it}"
+  docker run --user "$(id -u):$(id -g)" \
+    --name "${NEOBENCH_CONTAINER_NAME:-neobench-it}" \
+    --detach --rm \
+    -e "NEO4J_ACCEPT_LICENSE_AGREEMENT=true" \
+    -e "NEO4J_AUTH=neo4j/secret" \
+    -p 7474:7474 -p 7687:7687 \
+    "${NEO4J_IMAGE}"
+
+  # Wait for db to come up
+  echo >&2 "Waiting for db to come up.."
+  while ! docker logs neobench-it | grep --quiet "Bolt enabled on"; do
+    sleep 5
+    if [[ "$(docker ps --filter "name=neobench-it" | wc -l)" != "2" ]]; then
+      echo >&2 "Database seems to have crashed?"
+      docker logs neobench-it
+      exit 1
+    fi
+    echo >&2 "Waiting for db to come up.."
+  done
+}
+
+teardown_db() {
+  local name="${NEOBENCH_CONTAINER_NAME:-neobench-it}"
+  docker kill "${name}" 2>/dev/null 1>&2 || true
+  docker rm "${name}" 2>/dev/null 1>&2 || true
+}
+
+main "$@"
