@@ -43,10 +43,25 @@ out/neobench_darwin_amd64: tmp/.unit-tests-pass
 > mkdir --parents $(@D)
 > env GOOS=darwin GOARCH=amd64 go build -o $@
 
-tmp/.unit-tests-pass: $(shell find . -name '*.go')
+tmp/.unit-tests-pass: tmp/.go-vet
 > mkdir --parents $(@D)
 > go test ./...
 > touch $@
+
+tmp/.go-vet: tmp/.gofmt
+> mkdir --parents $(@D)
+> go vet ./...
+> touch $@
+
+tmp/.gofmt: $(shell find . -name '*.go')
+> mkdir --parents $(@D)
+> if [[ "$$(gofmt -l .)" != "" ]]; then
+>   echo "You need to run gofmt on these files:"
+>   gofmt -l .
+>   exit 1
+> fi
+> touch $@
+
 
 tmp/.integration-tests-pass: tmp/.binaries-built
 > mkdir --parents $(@D)
