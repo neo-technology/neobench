@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/codahale/hdrhistogram"
 	"go.uber.org/zap"
+	"io/ioutil"
 	"log"
 	"neobench/pkg"
 	"neobench/pkg/workload"
@@ -109,7 +110,13 @@ func createWorkload(path string, scale, seed int64) (workload.Workload, error) {
 	if path == "builtin:tpcb-like" {
 		return workload.Parse("builtin:tpcp-like", workload.TPCBLike, scale, seed)
 	}
-	panic(fmt.Sprintf("Unsupported workload: %s", path))
+
+	scriptContent, err := ioutil.ReadFile(path)
+	if err != nil {
+		return workload.Workload{}, fmt.Errorf("failed to read workload file at %s: %s", path, err)
+	}
+
+	return workload.Parse(path, string(scriptContent), scale, seed)
 }
 
 func awaitCompletion(stopCh chan struct{}, deadline time.Time, sLogger *zap.SugaredLogger) {

@@ -63,7 +63,7 @@ tmp/.gofmt: $(shell find . -name '*.go')
 > touch $@
 
 
-tmp/.integration-tests-pass: tmp/.binaries-built
+tmp/.integration-tests-pass: tmp/.binaries-built test/integration-test
 > mkdir --parents $(@D)
 > export NEOBENCH_PATH="$$(realpath out/neobench_linux_amd64)"
 > NEO4J_IMAGE="neo4j:4.1.0" test/integration-test

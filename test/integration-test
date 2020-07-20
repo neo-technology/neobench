@@ -21,14 +21,23 @@ stacktrace() {
 
 : "${NEOBENCH_PATH:?Please set NEOBENCH_PATH to the neobench binary you want to test}"
 
+SCRIPTPATH="$( cd "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+
 main() {
   test_tpcb_like
+  test_custom_script
 }
 
 test_tpcb_like() {
   setup_db
 
   "${NEOBENCH_PATH}" -i -e=false -p secret -w builtin:tpcb-like -d 5
+}
+
+test_custom_script() {
+  setup_db
+
+  "${NEOBENCH_PATH}" -e=false -p secret -w "${SCRIPTPATH}/test.script" -d 5
 }
 
 setup_db() {
