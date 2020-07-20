@@ -17,7 +17,7 @@ type Worker struct {
 	// the latency as the time from when the transaction *would* have started,
 	// rather than from when it actually started.
 	transactionRate time.Duration
-	now func() time.Time
+	now             func() time.Time
 }
 
 func (w *Worker) Run(wrk workload.ClientWorkload, stopCh <-chan struct{}) (*hdrhistogram.Histogram, error) {
@@ -34,7 +34,7 @@ func (w *Worker) Run(wrk workload.ClientWorkload, stopCh <-chan struct{}) (*hdrh
 
 	for {
 		select {
-		case <- stopCh:
+		case <-stopCh:
 			return hdr, nil
 		default:
 		}
@@ -83,9 +83,9 @@ func (w *Worker) runUnit(session neo4j.Session, uow workload.UnitOfWork) error {
 
 func NewWorker(driver neo4j.Driver, logger *zap.Logger, rate time.Duration) *Worker {
 	return &Worker{
-		driver: driver,
-		logger: logger,
+		driver:          driver,
+		logger:          logger,
 		transactionRate: rate,
-		now: time.Now,
+		now:             time.Now,
 	}
 }

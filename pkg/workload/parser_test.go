@@ -20,19 +20,19 @@ func TestParser(t *testing.T) {
 			Params: params,
 		},
 		{
-			Query:"MATCH (account:Account {aid:$aid}) RETURN account.balance",
+			Query:  "MATCH (account:Account {aid:$aid}) RETURN account.balance",
 			Params: params,
 		},
 		{
-			Query:"MATCH (teller:Tellers {tid: $tid}) SET teller.balance = teller.balance + $delta",
+			Query:  "MATCH (teller:Tellers {tid: $tid}) SET teller.balance = teller.balance + $delta",
 			Params: params,
 		},
 		{
-			Query:"MATCH (branch:Branch {bid: $bid}) SET branch.balance = branch.balance + $delta",
+			Query:  "MATCH (branch:Branch {bid: $bid}) SET branch.balance = branch.balance + $delta",
 			Params: params,
 		},
 		{
-			Query:"CREATE (:History { tid: $tid, bid: $bid, aid: $aid, delta: $delta, mtime: timestamp() })",
+			Query:  "CREATE (:History { tid: $tid, bid: $bid, aid: $aid, delta: $delta, mtime: timestamp() })",
 			Params: params,
 		},
 	}, uow.Statements)

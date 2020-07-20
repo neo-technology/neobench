@@ -8,28 +8,27 @@ import (
 	"text/scanner"
 )
 
-
 type Workload struct {
 	Readonly bool
-	Scale int64
+	Scale    int64
 	Commands []Command
-	Rand *rand.Rand
+	Rand     *rand.Rand
 }
 
 func (s *Workload) NewClient() ClientWorkload {
 	return ClientWorkload{
 		Readonly: s.Readonly,
-		Scale: s.Scale,
+		Scale:    s.Scale,
 		Commands: s.Commands,
-		Rand: rand.New(rand.NewSource(s.Rand.Int63())),
+		Rand:     rand.New(rand.NewSource(s.Rand.Int63())),
 	}
 }
 
 type ClientWorkload struct {
 	Readonly bool
-	Scale int64
+	Scale    int64
 	Commands []Command
-	Rand *rand.Rand
+	Rand     *rand.Rand
 }
 
 func (s *ClientWorkload) Next() (UnitOfWork, error) {
@@ -55,12 +54,12 @@ func (s *ClientWorkload) Next() (UnitOfWork, error) {
 }
 
 type UnitOfWork struct {
-	Readonly bool
+	Readonly   bool
 	Statements []Statement
 }
 
 type Statement struct {
-	Query string
+	Query  string
 	Params map[string]interface{}
 }
 
@@ -68,7 +67,6 @@ type CommandContext struct {
 	Vars map[string]interface{}
 	Rand *rand.Rand
 }
-
 
 type Command interface {
 	Execute(ctx *CommandContext, uow *UnitOfWork) error
@@ -108,7 +106,7 @@ func Parse(filename, script string, scale, seed int64) (Workload, error) {
 	var s scanner.Scanner
 	s.Init(strings.NewReader(script))
 	s.Filename = filename
-	s.Whitespace ^= 1<<'\n' // don't skip newlines
+	s.Whitespace ^= 1 << '\n' // don't skip newlines
 
 	c := &context{
 		s: s,
@@ -135,9 +133,9 @@ func Parse(filename, script string, scale, seed int64) (Workload, error) {
 
 	return Workload{
 		Readonly: false, // TODO
-		Scale: scale,
+		Scale:    scale,
 		Commands: commands,
-		Rand: rand.New(rand.NewSource(seed)),
+		Rand:     rand.New(rand.NewSource(seed)),
 	}, nil
 }
 
@@ -263,6 +261,7 @@ func expect(c *context, expected rune) {
 }
 
 type ExprKind uint8
+
 const (
 	nullExpr ExprKind = 0
 	intExpr  ExprKind = 1
@@ -274,11 +273,11 @@ func (e ExprKind) String() string {
 	return exprKindNames[e]
 }
 
-var exprKindNames = []string {
+var exprKindNames = []string{
 	nullExpr: "N/A",
-	intExpr: "int",
+	intExpr:  "int",
 	callExpr: "call",
-	varExpr: "var",
+	varExpr:  "var",
 }
 
 type Expression struct {
@@ -331,7 +330,7 @@ func (f CallExpr) String() string {
 
 func (f CallExpr) argAsNumber(i int, ctx *CommandContext) (Number, error) {
 	if len(f.args) <= i {
-		return Number{}, fmt.Errorf("expected at least %d arguments, got %d", i + 1, len(f.args))
+		return Number{}, fmt.Errorf("expected at least %d arguments, got %d", i+1, len(f.args))
 	}
 	value, err := f.args[i].Eval(ctx)
 	if err != nil {
@@ -370,10 +369,10 @@ func (f CallExpr) Eval(ctx *CommandContext) (interface{}, error) {
 
 		if a.isFloat || b.isFloat {
 			min, max := a.val, b.val
-			return min + rand.Float64() * (max - min), nil
+			return min + rand.Float64()*(max-min), nil
 		} else {
 			min, max := a.iVal, b.iVal
-			return min + ctx.Rand.Int63n(max - min), nil
+			return min + ctx.Rand.Int63n(max-min), nil
 		}
 	case "*":
 		a, err := f.argAsNumber(0, ctx)
@@ -399,9 +398,9 @@ func (f CallExpr) Eval(ctx *CommandContext) (interface{}, error) {
 type Number struct {
 	isFloat bool
 	// Always set
-	val     float64
+	val float64
 	// Only set if isFloat == false
-	iVal    int64
+	iVal int64
 }
 
 type context struct {

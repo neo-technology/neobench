@@ -22,7 +22,7 @@ CREATE (:History { tid: $tid, bid: $bid, aid: $aid, delta: $delta, mtime: timest
 
 func InitTPCBLike(scale int64, driver neo4j.Driver, logger *zap.SugaredLogger) error {
 	numBranches := 1 * scale
-	numTellers :=  10 * scale
+	numTellers := 10 * scale
 	numAccounts := 100000 * scale
 	session, err := driver.Session(neo4j.AccessModeWrite)
 	if err != nil {
@@ -52,7 +52,7 @@ MERGE (:Branch {bid: branchId, balance: 0})
 	logger.Infof("Ensuring %d tellers..", numTellers)
 	_, err = session.Run(`UNWIND range(1, $nTellers) AS tellerId 
 MERGE (t:Teller {tid: tellerId, balance: 0})
-`, map[string]interface{} {
+`, map[string]interface{}{
 		"nTellers": numTellers,
 	})
 	if err != nil {
@@ -70,8 +70,8 @@ MERGE (t:Teller {tid: tellerId, balance: 0})
 	batchSize := int64(5000)
 	numBatches := numAccounts / batchSize
 	for batchNo := int64(0); batchNo <= numBatches; batchNo++ {
-		startAccount := max(existingAccountNum, batchSize * batchNo + 1)
-		endAccount := min(numAccounts, startAccount + batchSize)
+		startAccount := max(existingAccountNum, batchSize*batchNo+1)
+		endAccount := min(numAccounts, startAccount+batchSize)
 		if endAccount <= startAccount {
 			continue
 		}
@@ -80,7 +80,7 @@ MERGE (t:Teller {tid: tellerId, balance: 0})
 CREATE (a:Account {aid: accountId, balance: 0})
 `, map[string]interface{}{
 			"startAccount": startAccount,
-			"endAccount": endAccount,
+			"endAccount":   endAccount,
 		})
 		if err != nil {
 			return err

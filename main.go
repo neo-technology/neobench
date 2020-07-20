@@ -36,7 +36,7 @@ func main() {
 	sLogger := logger.Sugar()
 
 	ratePerWorkerPerSecond := *rate / float64(*clients)
-	ratePerWorkerDuration := time.Duration(1000 * 1000 / ratePerWorkerPerSecond) * time.Microsecond
+	ratePerWorkerDuration := time.Duration(1000*1000/ratePerWorkerPerSecond) * time.Microsecond
 
 	driver, err := newDriver(*url, *user, *password, *encrypted)
 	if err != nil {
@@ -54,7 +54,7 @@ func main() {
 			panic(err)
 		}
 	}
-	
+
 	stopCh, stop := pkg.SetupSignalHandler(sLogger)
 	defer stop()
 
@@ -73,14 +73,14 @@ func main() {
 				stop()
 				resultChan <- workerResult{
 					workerId: workerId,
-					err: err,
+					err:      err,
 				}
 				return
 			}
 
 			resultChan <- workerResult{
 				workerId: workerId,
-				hdr: result,
+				hdr:      result,
 			}
 		}()
 	}
@@ -171,8 +171,8 @@ func processResults(sLogger *zap.SugaredLogger, concurrency int, resultChan chan
 
 type workerResult struct {
 	workerId int
-	hdr *hdrhistogram.Histogram
-	err error
+	hdr      *hdrhistogram.Histogram
+	err      error
 }
 
 func newDriver(url, user, password string, encrypted bool) (neo4j.Driver, error) {

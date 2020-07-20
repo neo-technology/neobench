@@ -51,4 +51,3 @@ func SetupSignalHandler(logger *zap.SugaredLogger) (stopCh chan struct{}, stopFu
 
 	return stopCh, stopFunc
 }
-
