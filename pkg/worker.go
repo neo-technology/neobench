@@ -12,15 +12,14 @@ import (
 type Worker struct {
 	driver neo4j.Driver
 	logger *zap.Logger
-	// Time between transactions; this defines the workload rate
-	// if the database can't keep up at this pace the workload will report
-	// the latency as the time from when the transaction *would* have started,
-	// rather than from when it actually started.
-	transactionRate time.Duration
-	now             func() time.Time
+	now    func() time.Time
 }
 
-func (w *Worker) Run(wrk workload.ClientWorkload, stopCh <-chan struct{}) (*hdrhistogram.Histogram, error) {
+// transactionRate is Time between transactions; this defines the workload rate
+// if the database can't keep up at this pace the workload will report
+// the latency as the time from when the transaction *would* have started,
+// rather than from when it actually started.
+func (w *Worker) RunLatencyBenchmark(wrk workload.ClientWorkload, transactionRate time.Duration, stopCh <-chan struct{}) (*hdrhistogram.Histogram, error) {
 	session, err := w.driver.Session(neo4j.AccessModeWrite)
 	if err != nil {
 		return nil, err
@@ -29,7 +28,7 @@ func (w *Worker) Run(wrk workload.ClientWorkload, stopCh <-chan struct{}) (*hdrh
 
 	hdr := hdrhistogram.New(0, 60*60*1000000, 5)
 	workStartTime := w.now()
-	nextStart := workStartTime.Add(w.transactionRate)
+	nextStart := workStartTime.Add(transactionRate)
 	completedCounter := 0
 
 	for {
@@ -40,7 +39,7 @@ func (w *Worker) Run(wrk workload.ClientWorkload, stopCh <-chan struct{}) (*hdrh
 		}
 
 		deltaStart := nextStart.Sub(w.now())
-		if err = hdr.RecordValue((w.transactionRate - deltaStart).Microseconds()); err != nil {
+		if err = hdr.RecordValue((transactionRate - deltaStart).Microseconds()); err != nil {
 			return nil, err
 		}
 		if deltaStart < 0 {
@@ -50,7 +49,7 @@ func (w *Worker) Run(wrk workload.ClientWorkload, stopCh <-chan struct{}) (*hdrh
 			time.Sleep(deltaStart)
 		}
 
-		nextStart = nextStart.Add(w.transactionRate)
+		nextStart = nextStart.Add(transactionRate)
 
 		uow, err := wrk.Next()
 		if err != nil {
@@ -59,6 +58,36 @@ func (w *Worker) Run(wrk workload.ClientWorkload, stopCh <-chan struct{}) (*hdrh
 		err = w.runUnit(session, uow)
 		if err != nil {
 			return nil, err
+		}
+		completedCounter += 1
+	}
+}
+
+func (w *Worker) RunThroughputBenchmark(wrk workload.ClientWorkload, stopCh <-chan struct{}) (float64, error) {
+	session, err := w.driver.Session(neo4j.AccessModeWrite)
+	if err != nil {
+		return 0, err
+	}
+	defer session.Close()
+
+	workStartTime := w.now()
+	completedCounter := 0
+
+	for {
+		select {
+		case <-stopCh:
+			rate := float64(completedCounter) / float64(w.now().Sub(workStartTime).Seconds())
+			return rate, nil
+		default:
+		}
+
+		uow, err := wrk.Next()
+		if err != nil {
+			return 0, err
+		}
+		err = w.runUnit(session, uow)
+		if err != nil {
+			return 0, err
 		}
 		completedCounter += 1
 	}
@@ -83,9 +112,8 @@ func (w *Worker) runUnit(session neo4j.Session, uow workload.UnitOfWork) error {
 
 func NewWorker(driver neo4j.Driver, logger *zap.Logger, rate time.Duration) *Worker {
 	return &Worker{
-		driver:          driver,
-		logger:          logger,
-		transactionRate: rate,
-		now:             time.Now,
+		driver: driver,
+		logger: logger,
+		now:    time.Now,
 	}
 }

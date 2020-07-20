@@ -25,6 +25,7 @@ var password = flag.String("p", "neo4j", "password")
 var encrypted = flag.Bool("e", true, "use encrypted connections")
 var duration = flag.Int("d", 60, "seconds to run")
 var workloadPath = flag.String("w", "builtin:tpcb-like", "workload to run")
+var benchmarkMode = flag.String("m", "throughput", "benchmark mode: throughput or latency, latency uses a fixed rate workload, see -r")
 
 func main() {
 	flag.Parse()
@@ -35,10 +36,6 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	sLogger := logger.Sugar()
-
-	ratePerWorkerPerSecond := *rate / float64(*clients)
-	ratePerWorkerDuration := time.Duration(1000*1000/ratePerWorkerPerSecond) * time.Microsecond
 
 	driver, err := newDriver(*url, *user, *password, *encrypted)
 	if err != nil {
@@ -57,10 +54,26 @@ func main() {
 		}
 	}
 
+	switch *benchmarkMode {
+	case "throughput":
+		os.Exit(runThroughputBenchmark(driver, logger, wrk, runtime))
+	case "latency":
+		os.Exit(runLatencyBenchmark(driver, logger, wrk, runtime))
+	default:
+		fmt.Printf("unknown mode: %s, supported modes are 'latency' and 'throughput'", *benchmarkMode)
+		os.Exit(1)
+	}
+}
+
+func runLatencyBenchmark(driver neo4j.Driver, logger *zap.Logger, wrk workload.Workload, runtime time.Duration) int {
+	sLogger := logger.Sugar()
 	stopCh, stop := pkg.SetupSignalHandler(sLogger)
 	defer stop()
 
-	resultChan := make(chan workerResult, *clients)
+	ratePerWorkerPerSecond := *rate / float64(*clients)
+	ratePerWorkerDuration := time.Duration(1000*1000/ratePerWorkerPerSecond) * time.Microsecond
+
+	resultChan := make(chan workerLatencyResult, *clients)
 	var wg sync.WaitGroup
 	for i := 0; i < *clients; i++ {
 		wg.Add(1)
@@ -69,18 +82,18 @@ func main() {
 		clientWork := wrk.NewClient()
 		go func() {
 			defer wg.Done()
-			result, err := worker.Run(clientWork, stopCh)
+			result, err := worker.RunLatencyBenchmark(clientWork, ratePerWorkerDuration, stopCh)
 			sLogger.Infof("Worker %d completed with %v", workerId, err)
 			if err != nil {
 				stop()
-				resultChan <- workerResult{
+				resultChan <- workerLatencyResult{
 					workerId: workerId,
 					err:      err,
 				}
 				return
 			}
 
-			resultChan <- workerResult{
+			resultChan <- workerLatencyResult{
 				workerId: workerId,
 				hdr:      result,
 			}
@@ -95,8 +108,127 @@ func main() {
 	wg.Wait()
 	sLogger.Infof("Processing results..")
 
-	exitCode := processResults(sLogger, *clients, resultChan)
-	os.Exit(exitCode)
+	exitCode := processLatencyResults(sLogger, *clients, resultChan)
+	return exitCode
+}
+
+func runThroughputBenchmark(driver neo4j.Driver, logger *zap.Logger, wrk workload.Workload, runtime time.Duration) int {
+	sLogger := logger.Sugar()
+	stopCh, stop := pkg.SetupSignalHandler(sLogger)
+	defer stop()
+
+	resultChan := make(chan workerThroughputResult, *clients)
+	var wg sync.WaitGroup
+	for i := 0; i < *clients; i++ {
+		wg.Add(1)
+		worker := pkg.NewWorker(driver, logger, 0)
+		workerId := i
+		clientWork := wrk.NewClient()
+		go func() {
+			defer wg.Done()
+			result, err := worker.RunThroughputBenchmark(clientWork, stopCh)
+			sLogger.Infof("Worker %d completed with %v", workerId, err)
+			if err != nil {
+				stop()
+				resultChan <- workerThroughputResult{
+					workerId: workerId,
+					err:      err,
+				}
+				return
+			}
+
+			resultChan <- workerThroughputResult{
+				workerId:      workerId,
+				ratePerSecond: result,
+			}
+		}()
+	}
+
+	sLogger.Infof("Started %d workers, now running for %s", *clients, runtime.String())
+	deadline := time.Now().Add(runtime)
+	awaitCompletion(stopCh, deadline, sLogger)
+	stop()
+	sLogger.Infof("Waiting for clients to stop..")
+	wg.Wait()
+	sLogger.Infof("Processing results..")
+
+	return processThroughputResults(sLogger, *clients, resultChan)
+}
+
+func processLatencyResults(sLogger *zap.SugaredLogger, concurrency int, resultChan chan workerLatencyResult) int {
+	// Collect results
+	results := make([]workerLatencyResult, 0, concurrency)
+	for i := 0; i < concurrency; i++ {
+		sLogger.Infof("Waiting on result from %d", i)
+		results = append(results, <-resultChan)
+	}
+
+	// Process results into one histogram and check for errors
+	var combinedHistogram *hdrhistogram.Histogram
+	for _, res := range results {
+		if res.err != nil {
+			sLogger.Errorf("Worker failed: %v", res.err)
+			continue
+		}
+		if combinedHistogram == nil {
+			// Copy the first one, we merge the others into this
+			combinedHistogram = hdrhistogram.Import(res.hdr.Export())
+		} else {
+			combinedHistogram.Merge(res.hdr)
+		}
+	}
+
+	// Report findings
+	fmt.Printf("== Results ==\n")
+	if combinedHistogram == nil {
+		fmt.Printf("All workers failed.\n")
+		return 1
+	}
+	for _, bracket := range combinedHistogram.CumulativeDistribution() {
+		fmt.Printf("  %.2f: %.5fms (N=%d)\n", bracket.Quantile, float64(bracket.ValueAt)/1000, bracket.Count)
+	}
+	return 0
+}
+
+func processThroughputResults(sLogger *zap.SugaredLogger, concurrency int, resultChan chan workerThroughputResult) int {
+	// Collect results
+	results := make([]workerThroughputResult, 0, concurrency)
+	for i := 0; i < concurrency; i++ {
+		sLogger.Infof("Waiting on result from %d", i)
+		results = append(results, <-resultChan)
+	}
+
+	totalRatePerSecond := 0.0
+	allFailed := false
+	for _, res := range results {
+		if res.err != nil {
+			sLogger.Errorf("Worker failed: %v", res.err)
+			continue
+		}
+		allFailed = false
+		totalRatePerSecond += res.ratePerSecond
+	}
+
+	// Report findings
+	fmt.Printf("== Results ==\n")
+	if allFailed {
+		fmt.Printf("All workers failed.\n")
+		return 1
+	}
+	fmt.Printf("  %.2f operations per second\n", totalRatePerSecond)
+	return 0
+}
+
+type workerLatencyResult struct {
+	workerId int
+	hdr      *hdrhistogram.Histogram
+	err      error
+}
+
+type workerThroughputResult struct {
+	workerId      int
+	ratePerSecond float64
+	err           error
 }
 
 func initWorkload(path string, scale int64, seed int64, driver neo4j.Driver, logger *zap.Logger) error {
@@ -142,47 +274,6 @@ func awaitCompletion(stopCh chan struct{}, deadline time.Time, sLogger *zap.Suga
 		}
 		time.Sleep(time.Millisecond * 100)
 	}
-}
-
-func processResults(sLogger *zap.SugaredLogger, concurrency int, resultChan chan workerResult) int {
-	// Collect results
-	results := make([]workerResult, 0, concurrency)
-	for i := 0; i < concurrency; i++ {
-		sLogger.Infof("Waiting on result from %d", i)
-		results = append(results, <-resultChan)
-	}
-
-	// Process results into one histogram and check for errors
-	var combinedHistogram *hdrhistogram.Histogram
-	for _, res := range results {
-		if res.err != nil {
-			sLogger.Errorf("Worker failed: %v", res.err)
-			continue
-		}
-		if combinedHistogram == nil {
-			// Copy the first one, we merge the others into this
-			combinedHistogram = hdrhistogram.Import(res.hdr.Export())
-		} else {
-			combinedHistogram.Merge(res.hdr)
-		}
-	}
-
-	// Report findings
-	fmt.Printf("== Results ==\n")
-	if combinedHistogram == nil {
-		fmt.Printf("All workers failed.\n")
-		return 1
-	}
-	for _, bracket := range combinedHistogram.CumulativeDistribution() {
-		fmt.Printf("  %.2f: %.5fms (N=%d)\n", bracket.Quantile, float64(bracket.ValueAt)/1000, bracket.Count)
-	}
-	return 0
-}
-
-type workerResult struct {
-	workerId int
-	hdr      *hdrhistogram.Histogram
-	err      error
 }
 
 func newDriver(url, user, password string, encrypted bool) (neo4j.Driver, error) {
