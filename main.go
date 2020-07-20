@@ -18,7 +18,7 @@ import "github.com/neo4j/neo4j-go-driver/neo4j"
 var initMode = flag.Bool("i", false, "initialize dataset before running workload")
 var scale = flag.Int64("s", 1, "scale factor, effect depends on workload but in general this scales the size of the dataset linearly")
 var clients = flag.Int("c", 1, "number of clients, ie. number of concurrent simulated database sessions")
-var rate = flag.Float64("r", 1, "transactions per second, total across all clients. This can be set to a fraction if you want")
+var rate = flag.Float64("r", 1, "in latency mode (see -m) this sets transactions per second, total across all clients. This can be set to a fraction if you want")
 var url = flag.String("a", "bolt://localhost:7687", "address to connect to, eg. bolt+routing://mydb:7687")
 var user = flag.String("u", "neo4j", "username")
 var password = flag.String("p", "neo4j", "password")
@@ -28,6 +28,42 @@ var workloadPath = flag.String("w", "builtin:tpcb-like", "workload to run")
 var benchmarkMode = flag.String("m", "throughput", "benchmark mode: throughput or latency, latency uses a fixed rate workload, see -r")
 
 func main() {
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), `
+neobench - scriptable workload generator for Neo4j
+
+  neobench runs a canned or user-defined workload against a specified Neo4j Database.
+  By default, it measures the maximum throughput it can achieve, but it can also
+  measure latencies, automatically correcting for coordinated omission.
+
+  There is one built-in workload, used by default: builtin:tpcb-like, it is very 
+  similar to the tpcb-like workload found in pgbench.
+
+Usage:
+
+`)
+		flag.PrintDefaults()
+		fmt.Fprintf(flag.CommandLine.Output(), `
+Custom scripts
+
+  Workload scripts consist of commands and meta-commands. Commands are Cypher queries, 
+  separated by semi-colon, like so:
+
+      CREATE (n:Person);
+      MATCH (n) RETURN n;
+
+  Currently only one meta-command is available: \set, it lets you set variables to use
+  in your queries and in subsequent meta-commands:
+
+      \set myParam random(1, 100)
+      CREATE (n:Person {name: $myParam});
+
+  Meta-commands are separated by newline.
+
+  Commands are executed one-at-a-time, all of them in one single transaction. Latency and
+  throughput rates are for the full script, not per-query.
+`)
+	}
 	flag.Parse()
 	seed := time.Now().Unix()
 	runtime := time.Duration(*duration) * time.Second
