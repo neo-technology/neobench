@@ -20,7 +20,7 @@ type Worker struct {
 	now func() time.Time
 }
 
-func (w *Worker) Run(wrk workload.Workload, stopCh <-chan struct{}) (*hdrhistogram.Histogram, error) {
+func (w *Worker) Run(wrk workload.ClientWorkload, stopCh <-chan struct{}) (*hdrhistogram.Histogram, error) {
 	session, err := w.driver.Session(neo4j.AccessModeWrite)
 	if err != nil {
 		return nil, err
@@ -52,7 +52,10 @@ func (w *Worker) Run(wrk workload.Workload, stopCh <-chan struct{}) (*hdrhistogr
 
 		nextStart = nextStart.Add(w.transactionRate)
 
-		uow := wrk.Next()
+		uow, err := wrk.Next()
+		if err != nil {
+			return nil, err
+		}
 		err = w.runUnit(session, uow)
 		if err != nil {
 			return nil, err

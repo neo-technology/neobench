@@ -7,14 +7,14 @@ import (
 	"go.uber.org/zap"
 	"log"
 	"neobench/pkg"
-	"neobench/pkg/workload/tpcb"
+	"neobench/pkg/workload"
 	"sync"
 	"time"
 )
 import "github.com/neo4j/neo4j-go-driver/neo4j"
 
 var initMode = flag.Bool("i", false, "initialize dataset before running workload")
-var scale = flag.Int("s", 1, "scale factor, effect depends on workload but in general this scales the size of the dataset linearly")
+var scale = flag.Int64("s", 1, "scale factor, effect depends on workload but in general this scales the size of the dataset linearly")
 var clients = flag.Int("c", 1, "number of clients, ie. number of concurrent simulated database sessions")
 var rate = flag.Float64("r", 1, "transactions per second, total across all clients. This can be set to a fraction if you want")
 var url = flag.String("a", "bolt://localhost:7687", "address to connect to, eg. bolt+routing://mydb:7687")
@@ -22,24 +22,11 @@ var user = flag.String("u", "neo4j", "username")
 var password = flag.String("p", "neo4j", "password")
 var encrypted = flag.Bool("e", true, "use encrypted connections")
 var duration = flag.Int("d", 60, "seconds to run")
-
+var workloadPath = flag.String("w", "builtin:tpcb-like", "workload to run")
 
 func main() {
 	flag.Parse()
-	//
-	//url := "bolt+routing://35a43747-launch41.databases.neo4j.io:7687" // hammer4
-	//password := "LjlKod4P4Xea8afhDFWVMZuMLq34KjExwMt5-Br2MI4" // hammer4
-	//url := "bolt+routing://088a4483-launch41.databases.neo4j.io:7687" // hammer3
-	//password := "5MxfzeALfFuRjJX7VwB8UdHfua-A7_juUoYqtc1J9jc" // hammer3
-	//user := "neo4j"
-	//
-	//encrypted := true
-	//scale := 5
-	//rate := 60
-	//runtime := 5 * 60 * time.Second
-	//
-	//concurrency := 4
-
+	seed := time.Now().Unix()
 	runtime := time.Duration(*duration) * time.Second
 
 	logger, err := zap.NewProduction()
@@ -56,15 +43,18 @@ func main() {
 		log.Fatal(err)
 	}
 
-	workload := tpcb.NewTpcB(*scale)
+	wrk, err := createWorkload(*workloadPath, *scale, seed)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	if *initMode {
-		err = workload.Initialize(driver, sLogger)
+		err = initWorkload(*workloadPath, *scale, seed, driver, logger)
 		if err != nil {
 			panic(err)
 		}
 	}
-
+	
 	stopCh, stop := pkg.SetupSignalHandler(sLogger)
 	defer stop()
 
@@ -74,9 +64,10 @@ func main() {
 		wg.Add(1)
 		worker := pkg.NewWorker(driver, logger, ratePerWorkerDuration)
 		workerId := i
+		clientWork := wrk.NewClient()
 		go func() {
 			defer wg.Done()
-			result, err := worker.Run(workload, stopCh)
+			result, err := worker.Run(clientWork, stopCh)
 			sLogger.Infof("Worker %d completed with %v", workerId, err)
 			if err != nil {
 				stop()
@@ -103,6 +94,20 @@ func main() {
 	sLogger.Infof("Processing results..")
 
 	processResults(sLogger, *clients, resultChan)
+}
+
+func initWorkload(path string, scale int64, seed int64, driver neo4j.Driver, logger *zap.Logger) error {
+	if path == "builtin:tpcb-like" {
+		return workload.InitTPCBLike(scale, driver, logger.Sugar())
+	}
+	return fmt.Errorf("init option is only supported for built-in workloads; if you want to initialize a database for a custom script, simply set up the database as you prefer first")
+}
+
+func createWorkload(path string, scale, seed int64) (workload.Workload, error) {
+	if path == "builtin:tpcb-like" {
+		return workload.Parse("builtin:tpcp-like", workload.TPCBLike, scale, seed)
+	}
+	panic(fmt.Sprintf("Unsupported workload: %s", path))
 }
 
 func awaitCompletion(stopCh chan struct{}, deadline time.Time, sLogger *zap.SugaredLogger) {
