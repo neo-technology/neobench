@@ -1,9 +1,16 @@
 # neobench - scriptable Neo4j benchmarks
 
-neobench helps you tune your Neo4j deployment by measuring how different workloads perform.
+neobench helps you tune your Neo4j deployment by letting you run custom workloads. 
+You can explor how changing the database and server tuning changes throughput and latency.
 
-neobench is heavily inspired by pgbench. 
-It uses a similar scripting language, and ships with a similar default "tpcb-like" workload.
+It is heavily inspired by pgbench, and uses a similar scripting language.
+Neobench even ships with a default "tpcb-like" workload!
+
+# Warning: Pre-Release State!
+
+Please note that this is not yet stable. I intend to change the variable prefix from `:` to `$` to match cypher, and there may be changes to the command line options.
+
+Please do not compare benchmark results from different versions of this tool until - at the earliest - version 1.0.0.
 
 # Installation
 
@@ -23,11 +30,18 @@ Alternatively you can build from source by checking out this repo and running `m
     
     # Run a throughput test with a custom workload
     $ cat myworkload.script
-    \set accountId random(1,:scale * 1000)
+    \set accountId random(1, :scale * 1000)
     CREATE (a:Account {aid: $accountId});
     
     $ neobench -e=false -w myworkload.script 
-  
+
+# Custom scripts
+
+We aspire to support the same language as pgbench. 
+Currently the `\set` meta-command is supported, along with `*` for multiplication and the `random` function.
+
+See the "Custom Scripts" section in the [pgbench documentation](https://www.postgresql.org/docs/10/pgbench.html) for details and inspiration.
+
 # Contributions
 
 Minor contributions? Just open a PR. 
