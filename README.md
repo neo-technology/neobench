@@ -1,14 +1,15 @@
 # neobench - scriptable Neo4j benchmarks
 
 neobench helps you tune your Neo4j deployment by letting you run custom workloads. 
-You can explor how changing the database and server tuning changes throughput and latency.
+You can explore how changing the database and server tuning changes throughput and latency.
 
-It is heavily inspired by pgbench, and uses a similar scripting language.
+It is heavily inspired by [pgbench](https://www.postgresql.org/docs/10/pgbench.html), and uses a similar scripting language.
 Neobench even ships with a default "tpcb-like" workload!
 
 # Warning: Pre-Release State!
 
-Please note that this is not yet stable. I intend to change the variable prefix from `:` to `$` to match cypher, and there may be changes to the command line options.
+Please note that this is not yet stable. 
+I intend to change the variable prefix from `:` to `$` to match cypher, and there may be changes to the command line options.
 
 Please do not compare benchmark results from different versions of this tool until - at the earliest - version 1.0.0.
 
@@ -37,7 +38,7 @@ Alternatively you can build from source by checking out this repo and running `m
 
 # Custom scripts
 
-We aspire to support the same language as pgbench. 
+I aspire to support the same language as pgbench. 
 Currently the `\set` meta-command is supported, along with `*` for multiplication and the `random` function.
 
 See the "Custom Scripts" section in the [pgbench documentation](https://www.postgresql.org/docs/10/pgbench.html) for details and inspiration.
