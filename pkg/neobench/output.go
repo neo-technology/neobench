@@ -36,28 +36,28 @@ func NewOutput(name string) (Output, error) {
 
 	if name == "auto" {
 		fi, _ := os.Stdout.Stat()
-		if fi.Mode() & os.ModeCharDevice == 0 {
+		if fi.Mode()&os.ModeCharDevice == 0 {
 			return &CsvOutput{
-				ErrStream:          os.Stderr,
-				OutStream:          os.Stdout,
+				ErrStream: os.Stderr,
+				OutStream: os.Stdout,
 			}, nil
 		} else {
 			return &InteractiveOutput{
-				ErrStream:          os.Stderr,
-				OutStream:          os.Stdout,
+				ErrStream: os.Stderr,
+				OutStream: os.Stdout,
 			}, nil
 		}
 	}
 	if name == "interactive" {
 		return &InteractiveOutput{
-			ErrStream:          os.Stderr,
-			OutStream:          os.Stdout,
+			ErrStream: os.Stderr,
+			OutStream: os.Stdout,
 		}, nil
 	}
 	if name == "csv" {
 		return &CsvOutput{
-			ErrStream:          os.Stderr,
-			OutStream:          os.Stdout,
+			ErrStream: os.Stderr,
+			OutStream: os.Stdout,
 		}, nil
 	}
 	return nil, fmt.Errorf("unknown output format: %s, supported formats are 'auto', 'interactive' and 'csv'", name)
@@ -107,17 +107,17 @@ func (o *InteractiveOutput) ReportLatencyResult(result LatencyResult) {
 	s.WriteString(fmt.Sprintf("Total Transactions: %d\n", histo.TotalCount()))
 	s.WriteString("\n")
 	s.WriteString(fmt.Sprintf("Latency summary:\n"))
-	s.WriteString(fmt.Sprintf("  Min:    %.3fms\n", float64(histo.Min()) / 1000.0))
-	s.WriteString(fmt.Sprintf("  Mean:   %.3fms\n", histo.Mean() / 1000.0))
-	s.WriteString(fmt.Sprintf("  Max:    %.3fms\n", float64(histo.Max()) / 1000.0))
-	s.WriteString(fmt.Sprintf("  Stddev: %.3fms\n", histo.StdDev() / 1000.0))
+	s.WriteString(fmt.Sprintf("  Min:    %.3fms\n", float64(histo.Min())/1000.0))
+	s.WriteString(fmt.Sprintf("  Mean:   %.3fms\n", histo.Mean()/1000.0))
+	s.WriteString(fmt.Sprintf("  Max:    %.3fms\n", float64(histo.Max())/1000.0))
+	s.WriteString(fmt.Sprintf("  Stddev: %.3fms\n", histo.StdDev()/1000.0))
 	s.WriteString("\n")
 	s.WriteString(fmt.Sprintf("Latency distribution:\n"))
-	s.WriteString(fmt.Sprintf("  P50.000: %.03fms\n", float64(histo.ValueAtQuantile(50)) / 1000.0))
-	s.WriteString(fmt.Sprintf("  P75.000: %.03fms\n", float64(histo.ValueAtQuantile(75)) / 1000.0))
-	s.WriteString(fmt.Sprintf("  P95.000: %.03fms\n", float64(histo.ValueAtQuantile(95)) / 1000.0))
-	s.WriteString(fmt.Sprintf("  P99.000: %.03fms\n", float64(histo.ValueAtQuantile(99)) / 1000.0))
-	s.WriteString(fmt.Sprintf("  P99.999: %.03fms\n", float64(histo.ValueAtQuantile(99.999)) / 1000.0))
+	s.WriteString(fmt.Sprintf("  P50.000: %.03fms\n", float64(histo.ValueAtQuantile(50))/1000.0))
+	s.WriteString(fmt.Sprintf("  P75.000: %.03fms\n", float64(histo.ValueAtQuantile(75))/1000.0))
+	s.WriteString(fmt.Sprintf("  P95.000: %.03fms\n", float64(histo.ValueAtQuantile(95))/1000.0))
+	s.WriteString(fmt.Sprintf("  P99.000: %.03fms\n", float64(histo.ValueAtQuantile(99))/1000.0))
+	s.WriteString(fmt.Sprintf("  P99.999: %.03fms\n", float64(histo.ValueAtQuantile(99.999))/1000.0))
 
 	_, err := fmt.Fprint(o.OutStream, s.String())
 	if err != nil {
