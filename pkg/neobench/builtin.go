@@ -1,8 +1,7 @@
-package workload
+package neobench
 
 import (
 	"github.com/neo4j/neo4j-go-driver/neo4j"
-	"go.uber.org/zap"
 )
 
 const TPCBLike = `
@@ -20,7 +19,7 @@ MATCH (branch:Branch {bid: $bid}) SET branch.balance = branch.balance + $delta;
 CREATE (:History { tid: $tid, bid: $bid, aid: $aid, delta: $delta, mtime: timestamp() });
 `
 
-func InitTPCBLike(scale int64, driver neo4j.Driver, logger *zap.SugaredLogger) error {
+func InitTPCBLike(scale int64, driver neo4j.Driver, out Output) error {
 	numBranches := 1 * scale
 	numTellers := 10 * scale
 	numAccounts := 100000 * scale
@@ -30,7 +29,11 @@ func InitTPCBLike(scale int64, driver neo4j.Driver, logger *zap.SugaredLogger) e
 	}
 	defer session.Close()
 
-	logger.Infof("Creating indexes..")
+	out.ReportProgress(ProgressReport{
+		Section:      "init",
+		Step:         "create schema",
+		Completeness: 0,
+	})
 	_, err = session.Run(`CREATE CONSTRAINT ON (b:Branch) ASSERT b.bid IS UNIQUE
 CREATE CONSTRAINT ON (t:Teller) ASSERT t.tid IS UNIQUE
 CREATE CONSTRAINT ON (a:Account) ASSERT a.aid IS UNIQUE
@@ -39,7 +42,11 @@ CREATE CONSTRAINT ON (a:Account) ASSERT a.aid IS UNIQUE
 		return err
 	}
 
-	logger.Infof("Ensuring %d branches..", numBranches)
+	out.ReportProgress(ProgressReport{
+		Section:      "init",
+		Step:         "create branches & tellers",
+		Completeness: 0,
+	})
 	_, err = session.Run(`UNWIND range(1, $nBranches) AS branchId 
 MERGE (:Branch {bid: branchId, balance: 0})
 `, map[string]interface{}{
@@ -49,7 +56,6 @@ MERGE (:Branch {bid: branchId, balance: 0})
 		return err
 	}
 
-	logger.Infof("Ensuring %d tellers..", numTellers)
 	_, err = session.Run(`UNWIND range(1, $nTellers) AS tellerId 
 MERGE (t:Teller {tid: tellerId, balance: 0})
 `, map[string]interface{}{
@@ -59,7 +65,11 @@ MERGE (t:Teller {tid: tellerId, balance: 0})
 		return err
 	}
 
-	logger.Infof("Ensuring %d accounts..", numAccounts)
+	out.ReportProgress(ProgressReport{
+		Section:      "init",
+		Step:         "create accounts",
+		Completeness: 0,
+	})
 	result, err := session.Run("MATCH (:Account) RETURN COUNT(*) AS n", nil)
 	if err != nil {
 		return err
@@ -75,7 +85,6 @@ MERGE (t:Teller {tid: tellerId, balance: 0})
 		if endAccount <= startAccount {
 			continue
 		}
-		logger.Infof("  Batch %d/%d (%d -> %d]..", batchNo, numBatches, startAccount, endAccount)
 		_, err = session.Run(`UNWIND range($startAccount, $endAccount) AS accountId 
 CREATE (a:Account {aid: accountId, balance: 0})
 `, map[string]interface{}{
@@ -85,6 +94,11 @@ CREATE (a:Account {aid: accountId, balance: 0})
 		if err != nil {
 			return err
 		}
+		out.ReportProgress(ProgressReport{
+			Section:      "init",
+			Step:         "create accounts",
+			Completeness: float64(batchNo) / float64(numBatches),
+		})
 	}
 	return nil
 }

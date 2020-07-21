@@ -1,17 +1,14 @@
-package pkg
+package neobench
 
 import (
 	"fmt"
 	"github.com/codahale/hdrhistogram"
 	"github.com/neo4j/neo4j-go-driver/neo4j"
-	"go.uber.org/zap"
-	"neobench/pkg/workload"
 	"time"
 )
 
 type Worker struct {
 	driver neo4j.Driver
-	logger *zap.Logger
 	now    func() time.Time
 }
 
@@ -19,7 +16,7 @@ type Worker struct {
 // if the database can't keep up at this pace the workload will report
 // the latency as the time from when the transaction *would* have started,
 // rather than from when it actually started.
-func (w *Worker) RunLatencyBenchmark(wrk workload.ClientWorkload, transactionRate time.Duration, stopCh <-chan struct{}) (*hdrhistogram.Histogram, error) {
+func (w *Worker) RunLatencyBenchmark(wrk ClientWorkload, transactionRate time.Duration, stopCh <-chan struct{}) (*hdrhistogram.Histogram, error) {
 	session, err := w.driver.Session(neo4j.AccessModeWrite)
 	if err != nil {
 		return nil, err
@@ -42,10 +39,7 @@ func (w *Worker) RunLatencyBenchmark(wrk workload.ClientWorkload, transactionRat
 		if err = hdr.RecordValue((transactionRate - deltaStart).Microseconds()); err != nil {
 			return nil, err
 		}
-		if deltaStart < 0 {
-			w.logger.With().Warn("database is not keeping up with requested rate",
-				zap.Int64("behindMs", deltaStart.Milliseconds()))
-		} else {
+		if deltaStart > 0 {
 			time.Sleep(deltaStart)
 		}
 
@@ -63,7 +57,7 @@ func (w *Worker) RunLatencyBenchmark(wrk workload.ClientWorkload, transactionRat
 	}
 }
 
-func (w *Worker) RunThroughputBenchmark(wrk workload.ClientWorkload, stopCh <-chan struct{}) (float64, error) {
+func (w *Worker) RunThroughputBenchmark(wrk ClientWorkload, stopCh <-chan struct{}) (float64, error) {
 	session, err := w.driver.Session(neo4j.AccessModeWrite)
 	if err != nil {
 		return 0, err
@@ -93,7 +87,7 @@ func (w *Worker) RunThroughputBenchmark(wrk workload.ClientWorkload, stopCh <-ch
 	}
 }
 
-func (w *Worker) runUnit(session neo4j.Session, uow workload.UnitOfWork) error {
+func (w *Worker) runUnit(session neo4j.Session, uow UnitOfWork) error {
 	_, err := session.WriteTransaction(func(tx neo4j.Transaction) (interface{}, error) {
 		for _, s := range uow.Statements {
 			res, err := tx.Run(s.Query, s.Params)
@@ -110,10 +104,9 @@ func (w *Worker) runUnit(session neo4j.Session, uow workload.UnitOfWork) error {
 	return err
 }
 
-func NewWorker(driver neo4j.Driver, logger *zap.Logger, rate time.Duration) *Worker {
+func NewWorker(driver neo4j.Driver) *Worker {
 	return &Worker{
 		driver: driver,
-		logger: logger,
 		now:    time.Now,
 	}
 }

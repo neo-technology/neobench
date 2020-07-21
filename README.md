@@ -1,9 +1,9 @@
-# neobench - scriptable benchmark tool for Neo4j
+# neobench - scriptable Neo4j benchmarks
 
 neobench helps you tune your Neo4j deployment by measuring how different workloads perform.
 
-neobench is heavily inspired by pgbench. It uses a very similar scripting language,
-and ships with a very similar default "tpcb-like" workload.
+neobench is heavily inspired by pgbench. 
+It uses a similar scripting language, and ships with a similar default "tpcb-like" workload.
 
 # Minimum examples
 
@@ -18,7 +18,8 @@ and ships with a very similar default "tpcb-like" workload.
     # Run a throughput test with a custom workload
     echo "\set accountId random(1,:scale * 1000)
     CREATE (a:Account {aid: \$accountId});" > myworkload.script
-    neobench -e=false -w myworkload.script    
+    neobench -e=false -w myworkload.script 
+   
 # License
 
 Apache 2

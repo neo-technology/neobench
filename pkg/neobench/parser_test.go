@@ -1,4 +1,4 @@
-package workload
+package neobench
 
 import (
 	"github.com/stretchr/testify/assert"
@@ -6,7 +6,6 @@ import (
 )
 
 func TestParser(t *testing.T) {
-
 	wrk, err := Parse("builtin:tpcb-like", TPCBLike, 1, 1337)
 
 	assert.NoError(t, err)

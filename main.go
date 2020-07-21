@@ -4,12 +4,11 @@ import (
 	"flag"
 	"fmt"
 	"github.com/codahale/hdrhistogram"
-	"go.uber.org/zap"
 	"io/ioutil"
 	"log"
-	"neobench/pkg"
-	"neobench/pkg/workload"
+	"neobench/pkg/neobench"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -26,6 +25,7 @@ var encrypted = flag.Bool("e", true, "use encrypted connections")
 var duration = flag.Int("d", 60, "seconds to run")
 var workloadPath = flag.String("w", "builtin:tpcb-like", "workload to run")
 var benchmarkMode = flag.String("m", "throughput", "benchmark mode: throughput or latency, latency uses a fixed rate workload, see -r")
+var outputFormat = flag.String("o", "auto", "output report format, `auto`, `interactive` or `csv`; auto uses `interactive` stdout is to a terminal, otherwise csv")
 
 func main() {
 	flag.Usage = func() {
@@ -67,10 +67,11 @@ Custom scripts
 	flag.Parse()
 	seed := time.Now().Unix()
 	runtime := time.Duration(*duration) * time.Second
+	scenario := describeScenario()
 
-	logger, err := zap.NewProduction()
+	out, err := neobench.NewOutput(*outputFormat)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	driver, err := newDriver(*url, *user, *password, *encrypted)
@@ -84,26 +85,44 @@ Custom scripts
 	}
 
 	if *initMode {
-		err = initWorkload(*workloadPath, *scale, seed, driver, logger)
+		err = initWorkload(*workloadPath, *scale, driver, out)
 		if err != nil {
-			panic(err)
+			log.Fatal(err)
 		}
 	}
 
 	switch *benchmarkMode {
 	case "throughput":
-		os.Exit(runThroughputBenchmark(driver, logger, wrk, runtime))
+		os.Exit(runThroughputBenchmark(driver, scenario, out, wrk, runtime))
 	case "latency":
-		os.Exit(runLatencyBenchmark(driver, logger, wrk, runtime))
+		os.Exit(runLatencyBenchmark(driver, scenario, out, wrk, runtime))
 	default:
 		fmt.Printf("unknown mode: %s, supported modes are 'latency' and 'throughput'", *benchmarkMode)
 		os.Exit(1)
 	}
 }
 
-func runLatencyBenchmark(driver neo4j.Driver, logger *zap.Logger, wrk workload.Workload, runtime time.Duration) int {
-	sLogger := logger.Sugar()
-	stopCh, stop := pkg.SetupSignalHandler(sLogger)
+func describeScenario() string {
+	out := strings.Builder{}
+	out.WriteString(fmt.Sprintf("-m %s", *benchmarkMode))
+	out.WriteString(fmt.Sprintf(" -w %s", *workloadPath))
+	out.WriteString(fmt.Sprintf(" -c %d", *clients))
+	out.WriteString(fmt.Sprintf(" -s %d", *scale))
+	out.WriteString(fmt.Sprintf(" -d %d", *duration))
+	if *benchmarkMode == "latency" {
+		out.WriteString(fmt.Sprintf(" -r %f", *rate))
+	}
+	if !*encrypted {
+		out.WriteString(" -e=false")
+	}
+	if *initMode {
+		out.WriteString(" -i")
+	}
+	return out.String()
+}
+
+func runLatencyBenchmark(driver neo4j.Driver, scenario string, out neobench.Output, wrk neobench.Workload, runtime time.Duration) int {
+	stopCh, stop := neobench.SetupSignalHandler()
 	defer stop()
 
 	ratePerWorkerPerSecond := *rate / float64(*clients)
@@ -113,14 +132,14 @@ func runLatencyBenchmark(driver neo4j.Driver, logger *zap.Logger, wrk workload.W
 	var wg sync.WaitGroup
 	for i := 0; i < *clients; i++ {
 		wg.Add(1)
-		worker := pkg.NewWorker(driver, logger, ratePerWorkerDuration)
+		worker := neobench.NewWorker(driver)
 		workerId := i
 		clientWork := wrk.NewClient()
 		go func() {
 			defer wg.Done()
 			result, err := worker.RunLatencyBenchmark(clientWork, ratePerWorkerDuration, stopCh)
-			sLogger.Infof("Worker %d completed with %v", workerId, err)
 			if err != nil {
+				out.Errorf("worker %d crashed: %s", workerId, err)
 				stop()
 				resultChan <- workerLatencyResult{
 					workerId: workerId,
@@ -136,35 +155,40 @@ func runLatencyBenchmark(driver neo4j.Driver, logger *zap.Logger, wrk workload.W
 		}()
 	}
 
-	sLogger.Infof("Started %d workers, now running for %s", *clients, runtime.String())
+	out.ReportProgress(neobench.ProgressReport{
+		Section:      "benchmark",
+		Step:         "run",
+		Completeness: 0,
+	})
 	deadline := time.Now().Add(runtime)
-	awaitCompletion(stopCh, deadline, sLogger)
+	awaitCompletion(stopCh, deadline, out)
 	stop()
-	sLogger.Infof("Waiting for clients to stop..")
+	out.ReportProgress(neobench.ProgressReport{
+		Section:      "benchmark",
+		Step:         "stopping",
+		Completeness: 0,
+	})
 	wg.Wait()
-	sLogger.Infof("Processing results..")
 
-	exitCode := processLatencyResults(sLogger, *clients, resultChan)
-	return exitCode
+	return processLatencyResults(scenario, out, *clients, resultChan)
 }
 
-func runThroughputBenchmark(driver neo4j.Driver, logger *zap.Logger, wrk workload.Workload, runtime time.Duration) int {
-	sLogger := logger.Sugar()
-	stopCh, stop := pkg.SetupSignalHandler(sLogger)
+func runThroughputBenchmark(driver neo4j.Driver, scenario string, out neobench.Output, wrk neobench.Workload, runtime time.Duration) int {
+	stopCh, stop := neobench.SetupSignalHandler()
 	defer stop()
 
 	resultChan := make(chan workerThroughputResult, *clients)
 	var wg sync.WaitGroup
 	for i := 0; i < *clients; i++ {
 		wg.Add(1)
-		worker := pkg.NewWorker(driver, logger, 0)
+		worker := neobench.NewWorker(driver)
 		workerId := i
 		clientWork := wrk.NewClient()
 		go func() {
 			defer wg.Done()
 			result, err := worker.RunThroughputBenchmark(clientWork, stopCh)
-			sLogger.Infof("Worker %d completed with %v", workerId, err)
 			if err != nil {
+				out.Errorf("worker %d crashed: %s", workerId, err)
 				stop()
 				resultChan <- workerThroughputResult{
 					workerId: workerId,
@@ -180,22 +204,28 @@ func runThroughputBenchmark(driver neo4j.Driver, logger *zap.Logger, wrk workloa
 		}()
 	}
 
-	sLogger.Infof("Started %d workers, now running for %s", *clients, runtime.String())
+	out.ReportProgress(neobench.ProgressReport{
+		Section:      "benchmark",
+		Step:         "run",
+		Completeness: 0,
+	})
 	deadline := time.Now().Add(runtime)
-	awaitCompletion(stopCh, deadline, sLogger)
+	awaitCompletion(stopCh, deadline, out)
 	stop()
-	sLogger.Infof("Waiting for clients to stop..")
+	out.ReportProgress(neobench.ProgressReport{
+		Section:      "benchmark",
+		Step:         "stopping",
+		Completeness: 0,
+	})
 	wg.Wait()
-	sLogger.Infof("Processing results..")
 
-	return processThroughputResults(sLogger, *clients, resultChan)
+	return processThroughputResults(scenario, out, *clients, resultChan)
 }
 
-func processLatencyResults(sLogger *zap.SugaredLogger, concurrency int, resultChan chan workerLatencyResult) int {
+func processLatencyResults(scenario string, out neobench.Output, concurrency int, resultChan chan workerLatencyResult) int {
 	// Collect results
 	results := make([]workerLatencyResult, 0, concurrency)
 	for i := 0; i < concurrency; i++ {
-		sLogger.Infof("Waiting on result from %d", i)
 		results = append(results, <-resultChan)
 	}
 
@@ -203,7 +233,7 @@ func processLatencyResults(sLogger *zap.SugaredLogger, concurrency int, resultCh
 	var combinedHistogram *hdrhistogram.Histogram
 	for _, res := range results {
 		if res.err != nil {
-			sLogger.Errorf("Worker failed: %v", res.err)
+			out.Errorf("Worker failed: %v", res.err)
 			continue
 		}
 		if combinedHistogram == nil {
@@ -215,22 +245,31 @@ func processLatencyResults(sLogger *zap.SugaredLogger, concurrency int, resultCh
 	}
 
 	// Report findings
-	fmt.Printf("== Results ==\n")
 	if combinedHistogram == nil {
-		fmt.Printf("All workers failed.\n")
+		out.Errorf("all workers failed")
 		return 1
 	}
-	for _, bracket := range combinedHistogram.CumulativeDistribution() {
-		fmt.Printf("  %.2f: %.5fms (N=%d)\n", bracket.Quantile, float64(bracket.ValueAt)/1000, bracket.Count)
-	}
+	out.ReportLatencyResult(neobench.LatencyResult{
+		Scenario:       scenario,
+		TotalHistogram: combinedHistogram,
+	})
 	return 0
 }
 
-func processThroughputResults(sLogger *zap.SugaredLogger, concurrency int, resultChan chan workerThroughputResult) int {
+func processThroughputResults(scenario string, out neobench.Output, concurrency int, resultChan chan workerThroughputResult) int {
 	// Collect results
+	out.ReportProgress(neobench.ProgressReport{
+		Section:      "benchmark",
+		Step:         "collect-results",
+		Completeness: 0,
+	})
 	results := make([]workerThroughputResult, 0, concurrency)
 	for i := 0; i < concurrency; i++ {
-		sLogger.Infof("Waiting on result from %d", i)
+		out.ReportProgress(neobench.ProgressReport{
+			Section:      "benchmark",
+			Step:         "collect-results",
+			Completeness: float64(i) / float64(concurrency),
+		})
 		results = append(results, <-resultChan)
 	}
 
@@ -238,7 +277,7 @@ func processThroughputResults(sLogger *zap.SugaredLogger, concurrency int, resul
 	allFailed := false
 	for _, res := range results {
 		if res.err != nil {
-			sLogger.Errorf("Worker failed: %v", res.err)
+			out.Errorf("worker failed: %v", res.err)
 			continue
 		}
 		allFailed = false
@@ -246,12 +285,14 @@ func processThroughputResults(sLogger *zap.SugaredLogger, concurrency int, resul
 	}
 
 	// Report findings
-	fmt.Printf("== Results ==\n")
 	if allFailed {
-		fmt.Printf("All workers failed.\n")
+		out.Errorf("all workers failed")
 		return 1
 	}
-	fmt.Printf("  %.2f operations per second\n", totalRatePerSecond)
+	out.ReportThroughputResult(neobench.ThroughputResult{
+		Scenario:           scenario,
+		TotalRatePerSecond: totalRatePerSecond,
+	})
 	return 0
 }
 
@@ -267,28 +308,28 @@ type workerThroughputResult struct {
 	err           error
 }
 
-func initWorkload(path string, scale int64, seed int64, driver neo4j.Driver, logger *zap.Logger) error {
+func initWorkload(path string, scale int64, driver neo4j.Driver, out neobench.Output) error {
 	if path == "builtin:tpcb-like" {
-		return workload.InitTPCBLike(scale, driver, logger.Sugar())
+		return neobench.InitTPCBLike(scale, driver, out)
 	}
 	return fmt.Errorf("init option is only supported for built-in workloads; if you want to initialize a database for a custom script, simply set up the database as you prefer first")
 }
 
-func createWorkload(path string, scale, seed int64) (workload.Workload, error) {
+func createWorkload(path string, scale, seed int64) (neobench.Workload, error) {
 	if path == "builtin:tpcb-like" {
-		return workload.Parse("builtin:tpcp-like", workload.TPCBLike, scale, seed)
+		return neobench.Parse("builtin:tpcp-like", neobench.TPCBLike, scale, seed)
 	}
 
 	scriptContent, err := ioutil.ReadFile(path)
 	if err != nil {
-		return workload.Workload{}, fmt.Errorf("failed to read workload file at %s: %s", path, err)
+		return neobench.Workload{}, fmt.Errorf("failed to read workload file at %s: %s", path, err)
 	}
 
-	return workload.Parse(path, string(scriptContent), scale, seed)
+	return neobench.Parse(path, string(scriptContent), scale, seed)
 }
 
-func awaitCompletion(stopCh chan struct{}, deadline time.Time, sLogger *zap.SugaredLogger) {
-	lastProgressReport := time.Now()
+func awaitCompletion(stopCh chan struct{}, deadline time.Time, out neobench.Output) {
+	originalDelta := deadline.Sub(time.Now()).Seconds()
 	for {
 		select {
 		case <-stopCh:
@@ -299,21 +340,19 @@ func awaitCompletion(stopCh chan struct{}, deadline time.Time, sLogger *zap.Suga
 		now := time.Now()
 		delta := deadline.Sub(now)
 		if delta < 2*time.Second {
-			sLogger.Infof("Wrapping up..")
 			time.Sleep(delta)
 			break
 		}
-
-		if now.Sub(lastProgressReport) > 15*time.Second {
-			sLogger.Infof("%s remaining", delta.String())
-			lastProgressReport = now
-		}
+		out.ReportProgress(neobench.ProgressReport{
+			Section:      "benchmark",
+			Step:         "run",
+			Completeness: 1 - delta.Seconds()/originalDelta,
+		})
 		time.Sleep(time.Millisecond * 100)
 	}
 }
 
 func newDriver(url, user, password string, encrypted bool) (neo4j.Driver, error) {
-	fmt.Printf("URL=%s, ENCRYPTED=%v\n", url, encrypted)
 	config := func(conf *neo4j.Config) { conf.Encrypted = encrypted }
 	return neo4j.NewDriver(url, neo4j.BasicAuth(user, password, ""), config)
 }

@@ -1,7 +1,6 @@
-package pkg
+package neobench
 
 import (
-	"go.uber.org/zap"
 	"os"
 	"os/signal"
 	"syscall"
@@ -13,7 +12,7 @@ This func will setup signal handler channels.
 - Send one os.Signal on sigCh to start graceful shutdown.
 - Send another to force exit.
 */
-func SetupSignalHandler(logger *zap.SugaredLogger) (stopCh chan struct{}, stopFunc func()) {
+func SetupSignalHandler() (stopCh chan struct{}, stopFunc func()) {
 	shutdownSignals := []os.Signal{os.Interrupt, syscall.SIGTERM}
 
 	stopCh = make(chan struct{})
@@ -21,9 +20,7 @@ func SetupSignalHandler(logger *zap.SugaredLogger) (stopCh chan struct{}, stopFu
 	signal.Notify(sigCh, shutdownSignals...)
 
 	stopFunc = func() {
-		if stopCh == nil {
-			logger.Debug("stopCh already closed")
-		} else {
+		if stopCh != nil {
 			close(stopCh)
 			stopCh = nil
 		}
@@ -37,10 +34,8 @@ func SetupSignalHandler(logger *zap.SugaredLogger) (stopCh chan struct{}, stopFu
 
 			switch signalCount {
 			case 1:
-				logger.Info("Shutdown signal received, exiting...")
 				stopFunc()
 			case 2:
-				logger.Warn("Second shutdown signal received, force quitting...")
 				os.Exit(1)
 			}
 
