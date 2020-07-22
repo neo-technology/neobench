@@ -2,6 +2,7 @@ package neobench
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -182,24 +183,62 @@ func ident(c *context) string {
 
 func expr(c *context) Expression {
 	lhs := term(c)
-	tok := c.Peek()
-	if tok == '*' {
-		c.Next()
-		rhs := term(c)
-		return Expression{
-			Kind: callExpr,
-			Payload: CallExpr{
-				name: "*",
-				args: []Expression{lhs, rhs},
-			},
+	for {
+		tok := c.Peek()
+		if tok == '+' {
+			c.Next()
+			rhs := term(c)
+			lhs = Expression{
+				Kind: callExpr,
+				Payload: CallExpr{
+					name: "+",
+					args: []Expression{lhs, rhs},
+				},
+			}
+		} else if tok == '-' {
+			c.Next()
+			rhs := term(c)
+			lhs = Expression{
+				Kind: callExpr,
+				Payload: CallExpr{
+					name: "-",
+					args: []Expression{lhs, rhs},
+				},
+			}
+		} else {
+			return lhs
 		}
 	}
-	return lhs
 }
 
 func term(c *context) Expression {
 	lhs := factor(c)
-	return lhs
+	for {
+		tok := c.Peek()
+		if tok == '*' {
+			c.Next()
+			rhs := factor(c)
+			lhs = Expression{
+				Kind: callExpr,
+				Payload: CallExpr{
+					name: "*",
+					args: []Expression{lhs, rhs},
+				},
+			}
+		} else if tok == '/' {
+			c.Next()
+			rhs := factor(c)
+			lhs = Expression{
+				Kind: callExpr,
+				Payload: CallExpr{
+					name: "/",
+					args: []Expression{lhs, rhs},
+				},
+			}
+		} else {
+			return lhs
+		}
+	}
 }
 
 func factor(c *context) Expression {
@@ -231,6 +270,18 @@ func factor(c *context) Expression {
 			return Expression{}
 		}
 		return Expression{Kind: intExpr, Payload: int64(intVal)}
+	} else if tok == scanner.Float {
+		floatVal, err := strconv.ParseFloat(content, 64)
+		if err != nil {
+			c.fail(err)
+			return Expression{}
+		}
+		return Expression{Kind: floatExpr, Payload: floatVal}
+
+	} else if tok == '(' {
+		innerExp := expr(c)
+		expect(c, ')')
+		return innerExp
 	} else if tok == '-' {
 		tok, content := c.Next()
 		if tok == scanner.Int {
@@ -240,6 +291,13 @@ func factor(c *context) Expression {
 				return Expression{}
 			}
 			return Expression{Kind: intExpr, Payload: int64(-1 * intVal)}
+		} else if tok == scanner.Float {
+			floatVal, err := strconv.ParseFloat(content, 64)
+			if err != nil {
+				c.fail(err)
+				return Expression{}
+			}
+			return Expression{Kind: floatExpr, Payload: -1.0 * floatVal}
 		} else {
 			c.fail(fmt.Errorf("unexpected token, expected integer after minus sign: %s", scanner.TokenString(tok)))
 			return Expression{}
@@ -263,10 +321,11 @@ func expect(c *context, expected rune) {
 type ExprKind uint8
 
 const (
-	nullExpr ExprKind = 0
-	intExpr  ExprKind = 1
-	callExpr ExprKind = 2
-	varExpr  ExprKind = 3
+	nullExpr  ExprKind = 0
+	intExpr   ExprKind = 1
+	floatExpr ExprKind = 2
+	callExpr  ExprKind = 3
+	varExpr   ExprKind = 4
 )
 
 func (e ExprKind) String() string {
@@ -274,10 +333,11 @@ func (e ExprKind) String() string {
 }
 
 var exprKindNames = []string{
-	nullExpr: "N/A",
-	intExpr:  "int",
-	callExpr: "call",
-	varExpr:  "var",
+	nullExpr:  "N/A",
+	intExpr:   "int",
+	floatExpr: "double",
+	callExpr:  "call",
+	varExpr:   "var",
 }
 
 type Expression struct {
@@ -287,7 +347,7 @@ type Expression struct {
 
 func (e Expression) Eval(ctx *CommandContext) (interface{}, error) {
 	switch e.Kind {
-	case intExpr:
+	case intExpr, floatExpr:
 		return e.Payload, nil
 	case varExpr:
 		value, found := ctx.Vars[e.Payload.(string)]
@@ -306,6 +366,8 @@ func (e Expression) String() string {
 	switch e.Kind {
 	case intExpr:
 		return fmt.Sprintf("%d", e.Payload)
+	case floatExpr:
+		return fmt.Sprintf("%f", e.Payload)
 	case callExpr:
 		return e.Payload.(CallExpr).String()
 	case varExpr:
@@ -339,9 +401,9 @@ func (f CallExpr) argAsNumber(i int, ctx *CommandContext) (Number, error) {
 	switch value.(type) {
 	case int64:
 		iVal := value.(int64)
-		return Number{isFloat: false, val: float64(iVal), iVal: iVal}, nil
+		return Number{isDouble: false, val: float64(iVal), iVal: iVal}, nil
 	case float64:
-		return Number{isFloat: true, val: value.(float64)}, nil
+		return Number{isDouble: true, val: value.(float64)}, nil
 	default:
 		return Number{}, fmt.Errorf("expected int64 or float64, got %s (which is %T)", f.args[i].String(), value)
 	}
@@ -349,31 +411,125 @@ func (f CallExpr) argAsNumber(i int, ctx *CommandContext) (Number, error) {
 
 func (f CallExpr) Eval(ctx *CommandContext) (interface{}, error) {
 	switch f.name {
-	case "random":
+	case "abs":
 		a, err := f.argAsNumber(0, ctx)
 		if err != nil {
 			return nil, fmt.Errorf("in %s: %s", f.String(), err)
 		}
-		b, err := f.argAsNumber(1, ctx)
-		if err != nil {
-			return nil, fmt.Errorf("in %s: %s", f.String(), err)
-		}
-
-		if a.val == b.val {
-			if a.isFloat {
-				return a.val, nil
+		if a.isDouble {
+			return math.Abs(a.val), nil
+		} else {
+			if a.iVal < 0 {
+				return -1 * a.iVal, nil
 			} else {
 				return a.iVal, nil
 			}
 		}
-
-		if a.isFloat || b.isFloat {
-			min, max := a.val, b.val
-			return min + rand.Float64()*(max-min), nil
-		} else {
-			min, max := a.iVal, b.iVal
-			return min + ctx.Rand.Int63n(max-min), nil
+	case "int":
+		a, err := f.argAsNumber(0, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
 		}
+		if a.isDouble {
+			return int64(a.val), nil
+		} else {
+			return a.iVal, nil
+		}
+	case "double":
+		a, err := f.argAsNumber(0, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+		}
+		return a.val, nil
+	case "greatest":
+		if len(f.args) == 0 {
+			return nil, fmt.Errorf("greatest(..) requires at least one argument")
+		}
+		var max Number
+		isDouble := false
+		for i := range f.args {
+			arg, err := f.argAsNumber(i, ctx)
+			if err != nil {
+				return nil, fmt.Errorf("in %s: %s", f.String(), err)
+			}
+			isDouble = isDouble || arg.isDouble
+			if i == 0 {
+				max = arg
+				continue
+			}
+
+			if isDouble {
+				if arg.val > max.val {
+					max = arg
+				}
+			} else {
+				if arg.iVal > max.iVal {
+					max = arg
+				}
+			}
+		}
+		if isDouble {
+			return max.val, nil
+		}
+		return max.iVal, nil
+	case "least":
+		if len(f.args) == 0 {
+			return nil, fmt.Errorf("least(..) requires at least one argument")
+		}
+		var min Number
+		isDouble := false
+		for i := range f.args {
+			arg, err := f.argAsNumber(i, ctx)
+			if err != nil {
+				return nil, fmt.Errorf("in %s: %s", f.String(), err)
+			}
+			isDouble = isDouble || arg.isDouble
+			if i == 0 {
+				min = arg
+				continue
+			}
+			if isDouble {
+				if arg.val < min.val {
+					min = arg
+				}
+			} else {
+				if arg.iVal < min.iVal {
+					min = arg
+				}
+			}
+		}
+		if isDouble {
+			return min.val, nil
+		}
+		return min.iVal, nil
+	case "pi":
+		return math.Pi, nil
+	case "sqrt":
+		a, err := f.argAsNumber(0, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+		}
+		return math.Sqrt(a.val), nil
+	case "random":
+		lb, err := f.argAsNumber(0, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+		}
+		ub, err := f.argAsNumber(1, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+		}
+
+		if lb.isDouble || ub.isDouble {
+			return nil, fmt.Errorf("interval for random() must be integers, not doubles, in %s", f.String())
+		}
+
+		if lb.iVal == ub.iVal {
+			return lb.iVal, nil
+		}
+
+		min, max := lb.iVal, ub.iVal
+		return min + ctx.Rand.Int63n(max-min), nil
 	case "*":
 		a, err := f.argAsNumber(0, ctx)
 		if err != nil {
@@ -384,10 +540,51 @@ func (f CallExpr) Eval(ctx *CommandContext) (interface{}, error) {
 			return nil, fmt.Errorf("in %s: %s", f.String(), err)
 		}
 
-		if a.isFloat || b.isFloat {
+		if a.isDouble || b.isDouble {
 			return a.val * b.val, nil
 		} else {
 			return a.iVal * b.iVal, nil
+		}
+	case "/":
+		a, err := f.argAsNumber(0, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+		}
+		b, err := f.argAsNumber(1, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+		}
+
+		return a.val / b.val, nil
+	case "+":
+		a, err := f.argAsNumber(0, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+		}
+		b, err := f.argAsNumber(1, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+		}
+
+		if a.isDouble || b.isDouble {
+			return a.val + b.val, nil
+		} else {
+			return a.iVal + b.iVal, nil
+		}
+	case "-":
+		a, err := f.argAsNumber(0, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+		}
+		b, err := f.argAsNumber(1, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+		}
+
+		if a.isDouble || b.isDouble {
+			return a.val - b.val, nil
+		} else {
+			return a.iVal - b.iVal, nil
 		}
 	default:
 		return nil, fmt.Errorf("unknown function: %s", f.String())
@@ -396,10 +593,10 @@ func (f CallExpr) Eval(ctx *CommandContext) (interface{}, error) {
 
 // Hacky first stab at dealing with runtime coercion, refactor as needed
 type Number struct {
-	isFloat bool
+	isDouble bool
 	// Always set
 	val float64
-	// Only set if isFloat == false
+	// Only set if isDouble == false
 	iVal int64
 }
 
