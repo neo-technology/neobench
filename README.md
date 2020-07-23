@@ -9,7 +9,7 @@ Neobench even ships with a default "tpcb-like" workload!
 # Warning: Pre-Release State!
 
 Please note that this is not yet stable. 
-I intend to change the variable prefix from `:` to `$` to match cypher, and there may be changes to the command line options.
+Specifically the command line option naming is likely to change, as is the default workload.
 
 Please do not compare benchmark results from different versions of this tool until - at the earliest - version 1.0.0.
 
@@ -31,7 +31,7 @@ Alternatively you can build from source by checking out this repo and running `m
     
     # Run a throughput test with a custom workload
     $ cat myworkload.script
-    \set accountId random(1, :scale * 1000)
+    \set accountId random(1, $scale * 1000)
     CREATE (a:Account {aid: $accountId});
     
     $ neobench -e=false -w myworkload.script 

@@ -43,7 +43,7 @@ func TestParseTpcBLike(t *testing.T) {
 
 func TestSleep(t *testing.T) {
 	wrk, err := Parse("sleep", `\set sleeptime 13
-\sleep :sleeptime us
+\sleep $sleeptime us
 RETURN 1;`, 1, 1337)
 
 	assert.NoError(t, err)

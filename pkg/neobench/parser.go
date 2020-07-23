@@ -351,7 +351,7 @@ func factor(c *context) Expression {
 			c.fail(fmt.Errorf("unexpected token, expected integer after minus sign: %s", scanner.TokenString(tok)))
 			return Expression{}
 		}
-	} else if tok == ':' {
+	} else if tok == '$' {
 		varName := ident(c)
 		return Expression{Kind: varExpr, Payload: varName}
 	} else {
