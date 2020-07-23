@@ -23,18 +23,18 @@ Alternatively you can build from source by checking out this repo and running `m
 
     # Run the "TPCB-like" workload for 60 seconds against the default url, bolt://localhost:7687
     # with encryption disabled, measuring throughput for a single worker.
-    $ neobench -e=false
+    $ neobench
     
     # Same as above, but measure latency when running at 1 transaction per second
     # and with 4 concurrent clients
-    $ neobench -e=false -m latency -c 4
+    $ neobench -m latency -c 4
     
     # Run a throughput test with a custom workload
     $ cat myworkload.script
     \set accountId random(1, $scale * 1000)
     CREATE (a:Account {aid: $accountId});
     
-    $ neobench -e=false -w myworkload.script 
+    $ neobench -w myworkload.script 
 
 # Custom scripts
 

@@ -18,10 +18,10 @@ var initMode = flag.Bool("i", false, "initialize dataset before running workload
 var scale = flag.Int64("s", 1, "scale factor, effect depends on workload but in general this scales the size of the dataset linearly")
 var clients = flag.Int("c", 1, "number of clients, ie. number of concurrent simulated database sessions")
 var rate = flag.Float64("r", 1, "in latency mode (see -m) this sets transactions per second, total across all clients. This can be set to a fraction if you want")
-var url = flag.String("a", "bolt://localhost:7687", "address to connect to, eg. bolt+routing://mydb:7687")
+var url = flag.String("a", "neo4j://localhost:7687", "address to connect to, eg. bolt+routing://mydb:7687")
 var user = flag.String("u", "neo4j", "username")
 var password = flag.String("p", "neo4j", "password")
-var encrypted = flag.Bool("e", true, "use encrypted connections")
+var encryption = flag.String("e", "auto", "whether to use encryption, `auto`, `true` or `false`")
 var duration = flag.Int("d", 60, "seconds to run")
 var workloadPath = flag.String("w", "builtin:tpcb-like", "workload to run")
 var benchmarkMode = flag.String("m", "throughput", "benchmark mode: throughput or latency, latency uses a fixed rate workload, see -r")
@@ -43,26 +43,6 @@ Usage:
 
 `)
 		flag.PrintDefaults()
-		fmt.Fprintf(flag.CommandLine.Output(), `
-Custom scripts
-
-  Workload scripts consist of commands and meta-commands. Commands are Cypher queries, 
-  separated by semi-colon, like so:
-
-      CREATE (n:Person);
-      MATCH (n) RETURN n;
-
-  Currently only one meta-command is available: \set, it lets you set variables to use
-  in your queries and in subsequent meta-commands:
-
-      \set myParam random(1, 100)
-      CREATE (n:Person {name: $myParam});
-
-  Meta-commands are separated by newline.
-
-  Commands are executed one-at-a-time, all of them in one single transaction. Latency and
-  throughput rates are for the full script, not per-query.
-`)
 	}
 	flag.Parse()
 	seed := time.Now().Unix()
@@ -74,7 +54,19 @@ Custom scripts
 		log.Fatal(err)
 	}
 
-	driver, err := newDriver(*url, *user, *password, *encrypted)
+	var encryptionMode neobench.EncryptionMode
+	switch strings.ToLower(*encryption) {
+	case "auto":
+		encryptionMode = neobench.EncryptionAuto
+	case "true", "yes", "y", "1":
+		encryptionMode = neobench.EncryptionOn
+	case "false", "no", "n", "0":
+		encryptionMode = neobench.EncryptionOff
+	default:
+		log.Fatalf("Invalid encryption mode '%s', needs to be one of 'auto', 'true' or 'false'", *encryption)
+	}
+
+	driver, err := neobench.NewDriver(*url, *user, *password, encryptionMode)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -109,11 +101,9 @@ func describeScenario() string {
 	out.WriteString(fmt.Sprintf(" -c %d", *clients))
 	out.WriteString(fmt.Sprintf(" -s %d", *scale))
 	out.WriteString(fmt.Sprintf(" -d %d", *duration))
+	out.WriteString(fmt.Sprintf(" -e %s", *encryption))
 	if *benchmarkMode == "latency" {
 		out.WriteString(fmt.Sprintf(" -r %f", *rate))
-	}
-	if !*encrypted {
-		out.WriteString(" -e=false")
 	}
 	if *initMode {
 		out.WriteString(" -i")
@@ -350,9 +340,4 @@ func awaitCompletion(stopCh chan struct{}, deadline time.Time, out neobench.Outp
 		})
 		time.Sleep(time.Millisecond * 100)
 	}
-}
-
-func newDriver(url, user, password string, encrypted bool) (neo4j.Driver, error) {
-	config := func(conf *neo4j.Config) { conf.Encrypted = encrypted }
-	return neo4j.NewDriver(url, neo4j.BasicAuth(user, password, ""), config)
 }
