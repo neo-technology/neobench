@@ -43,9 +43,10 @@ See the "Custom Scripts" section in the [pgbench documentation](https://www.post
 
 A workload script consists of `commands`. 
 Each command is either a Cypher statement or a "meta-command".
-Cypher-statements end with semi-colon, meta-commands end with newline.
+Meta-commands start with a backslash and end at the newline.
+Cypher statements can span multiple lines, and end with a semi colon.
 
-Meta-statements generally introduce variables. 
+Meta-commands generally introduce variables. 
 The variables are available to subsequent meta-commands and as parameters in your queries. 
 
 Here is a small example with two meta-commands and one query:
