@@ -19,27 +19,33 @@ endif
 
 UNAME := $(shell uname)
 
+ifeq ($(NEOBENCH_VERSION),)
+  NEOBENCH_VERSION := dev
+endif
+
 build: tmp/.integration-tests-pass
 .PHONY: build
 
-tmp/.binaries-built: out/neobench_linux_amd64 out/neobench_linux_arm64 \
-  out/neobench_windows_amd64 out/neobench_darwin_amd64
+tmp/.binaries-built: out/neobench_$(NEOBENCH_VERSION)_linux_amd64 \
+  out/neobench_$(NEOBENCH_VERSION)_linux_arm64 \
+  out/neobench_$(NEOBENCH_VERSION)_windows_amd64 \
+  out/neobench_$(NEOBENCH_VERSION)_darwin_amd64
 > mkdir --parents $(@D)
 > touch $@
 
-out/neobench_linux_amd64: tmp/.unit-tests-pass
+out/neobench_$(NEOBENCH_VERSION)_linux_amd64: tmp/.unit-tests-pass
 > mkdir --parents $(@D)
 > env GOOS=linux GOARCH=amd64 go build -o $@
 
-out/neobench_linux_arm64: tmp/.unit-tests-pass
+out/neobench_$(NEOBENCH_VERSION)_linux_arm64: tmp/.unit-tests-pass
 > mkdir --parents $(@D)
 > env GOOS=linux GOARCH=arm64 go build -o $@
 
-out/neobench_windows_amd64: tmp/.unit-tests-pass
+out/neobench_$(NEOBENCH_VERSION)_windows_amd64: tmp/.unit-tests-pass
 > mkdir --parents $(@D)
 > env GOOS=windows GOARCH=amd64 go build -o $@
 
-out/neobench_darwin_amd64: tmp/.unit-tests-pass
+out/neobench_$(NEOBENCH_VERSION)_darwin_amd64: tmp/.unit-tests-pass
 > mkdir --parents $(@D)
 > env GOOS=darwin GOARCH=amd64 go build -o $@
 
@@ -62,10 +68,9 @@ tmp/.gofmt: $(shell find . -name '*.go')
 > fi
 > touch $@
 
-
 tmp/.integration-tests-pass: tmp/.binaries-built test/integration-test
 > mkdir --parents $(@D)
-> export NEOBENCH_PATH="$$(realpath out/neobench_linux_amd64)"
+> export NEOBENCH_PATH="$$(realpath out/neobench_$(NEOBENCH_VERSION)_linux_amd64)"
 > NEO4J_IMAGE="neo4j:4.1.0" test/integration-test
 > touch $@
 

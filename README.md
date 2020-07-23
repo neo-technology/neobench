@@ -39,9 +39,32 @@ Alternatively you can build from source by checking out this repo and running `m
 # Custom scripts
 
 I aspire to support the same language as pgbench. 
-Currently the `\set` meta-command is supported, along with `*` for multiplication and the `random` function.
-
 See the "Custom Scripts" section in the [pgbench documentation](https://www.postgresql.org/docs/10/pgbench.html) for details and inspiration.
+
+A workload script consists of `commands`. 
+Each command is either a Cypher statement or a "meta-command".
+Cypher-statements end with semi-colon, meta-commands end with newline.
+
+Meta-statements generally introduce variables. 
+The variables are available to subsequent meta-commands and as parameters in your queries. 
+
+Here is a small example with two meta-commands and one query:
+
+    \set numPeople $scale * 1000000
+    \set personId random() * numPeople
+    MATCH (p:Person {id: $personId}) RETURN p;
+
+Scripts are currently ran as a single transaction, though that may change before 1.0.
+
+The following meta-commands are currently supported:
+
+    \set <variable> <expression>
+    ex: \set myParam random() * 1000
+    
+    \sleep <expression> <unit>
+    ex: \sleep random() * 60 ms
+
+All expressions supported by pgbench 10 are supported, please see the pgbench docs linked above.
 
 # Contributions
 

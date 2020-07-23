@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+
+main() {
+  if [[ "$(git status --porcelain)" != "" ]]; then
+    echo "There are uncommitted changes, please release from clean branch"
+    exit 1
+  fi
+
+  echo "Current tags:"
+  git tag -l
+
+  echo -n "Type next version: "
+  read newVersion
+
+
+  echo -n "Release [${newVersion}]? [yN]"
+  read choice
+
+  if [[ "${choice}" != "y" ]]; then
+    exit 0
+  fi
+
+  echo "Making sure binaries are built.."
+  NEOBENCH_VERSION="${newVersion}" make
+
+  echo "Tagging and pushing"
+  git tag "${newVersion}"
+  git push --tags
+
+  echo "Done! You'll need to manually upload the ${NEOBENCH_VERSION} artifacts to github though"
+}
+
+main "$@"
