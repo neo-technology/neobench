@@ -27,7 +27,7 @@ main() {
   git tag "${newVersion}"
   git push --tags
 
-  echo "Done! You'll need to manually upload the ${NEOBENCH_VERSION} artifacts to github though"
+  echo "Done! You'll need to manually upload the ${newVersion} artifacts to github though"
 }
 
 main "$@"
