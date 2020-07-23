@@ -2,11 +2,14 @@ package neobench
 
 import (
 	"fmt"
+	"io"
 	"math"
 	"math/rand"
+	"os"
 	"strconv"
 	"strings"
 	"text/scanner"
+	"time"
 )
 
 type Workload struct {
@@ -22,6 +25,7 @@ func (s *Workload) NewClient() ClientWorkload {
 		Scale:    s.Scale,
 		Commands: s.Commands,
 		Rand:     rand.New(rand.NewSource(s.Rand.Int63())),
+		Stderr:   os.Stderr,
 	}
 }
 
@@ -30,10 +34,12 @@ type ClientWorkload struct {
 	Scale    int64
 	Commands []Command
 	Rand     *rand.Rand
+	Stderr   io.Writer
 }
 
 func (s *ClientWorkload) Next() (UnitOfWork, error) {
 	ctx := CommandContext{
+		Stderr: s.Stderr,
 		Vars: map[string]interface{}{
 			"scale": s.Scale,
 		},
@@ -65,8 +71,9 @@ type Statement struct {
 }
 
 type CommandContext struct {
-	Vars map[string]interface{}
-	Rand *rand.Rand
+	Stderr io.Writer
+	Vars   map[string]interface{}
+	Rand   *rand.Rand
 }
 
 type Command interface {
@@ -100,6 +107,24 @@ func (c SetCommand) Execute(ctx *CommandContext, uow *UnitOfWork) error {
 		return err
 	}
 	ctx.Vars[c.VarName] = value
+	return nil
+}
+
+type SleepCommand struct {
+	Duration Expression
+	Unit     time.Duration
+}
+
+func (c SleepCommand) Execute(ctx *CommandContext, uow *UnitOfWork) error {
+	sleepNumber, err := c.Duration.Eval(ctx)
+	if err != nil {
+		return err
+	}
+	sleepInt, ok := sleepNumber.(int64)
+	if !ok {
+		return fmt.Errorf("\\sleep must be given an integer expression, got %v", sleepNumber)
+	}
+	time.Sleep(time.Duration(sleepInt) * c.Unit)
 	return nil
 }
 
@@ -151,6 +176,30 @@ func metaCommand(c *context) Command {
 		return SetCommand{
 			VarName:    varName,
 			Expression: setExpr,
+		}
+	case "sleep":
+		durationBase := expr(c)
+		unit := time.Second
+		switch c.Peek() {
+		case '\n', scanner.EOF:
+			break
+		default:
+			_, unitStr := c.Next()
+			switch unitStr {
+			case "s":
+				unit = time.Second
+			case "ms":
+				unit = time.Millisecond
+			case "us":
+				unit = time.Microsecond
+			default:
+				c.fail(fmt.Errorf("\\sleep command must use 'us', 'ms', or 's' unit argument - or none. got: %s", c.peekText))
+				return nil
+			}
+		}
+		return SleepCommand{
+			Duration: durationBase,
+			Unit:     unit,
 		}
 	default:
 		c.fail(fmt.Errorf("unexpected meta command: '%s'", cmd))
@@ -435,6 +484,24 @@ func (f CallExpr) Eval(ctx *CommandContext) (interface{}, error) {
 		} else {
 			return a.iVal, nil
 		}
+	case "debug":
+		a, err := f.argAsNumber(0, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+		}
+		if a.isDouble {
+			_, err := fmt.Fprintf(ctx.Stderr, "%f\n", a.val)
+			if err != nil {
+				return nil, fmt.Errorf("in %s: %s", f.String(), err)
+			}
+			return a.val, nil
+		} else {
+			_, err := fmt.Fprintf(ctx.Stderr, "%d\n", a.iVal)
+			if err != nil {
+				return nil, fmt.Errorf("in %s: %s", f.String(), err)
+			}
+			return a.iVal, nil
+		}
 	case "double":
 		a, err := f.argAsNumber(0, ctx)
 		if err != nil {
@@ -530,6 +597,54 @@ func (f CallExpr) Eval(ctx *CommandContext) (interface{}, error) {
 
 		min, max := lb.iVal, ub.iVal
 		return min + ctx.Rand.Int63n(max-min), nil
+	case "random_exponential":
+		lb, err := f.argAsNumber(0, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+		}
+		ub, err := f.argAsNumber(1, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+		}
+		param, err := f.argAsNumber(2, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+		}
+
+		if lb.isDouble || ub.isDouble {
+			return nil, fmt.Errorf("interval for random() must be integers, not doubles, in %s", f.String())
+		}
+
+		if lb.iVal == ub.iVal {
+			return lb.iVal, nil
+		}
+
+		min, max := lb.iVal, ub.iVal
+		return exponentialRand(ctx.Rand, min, max, param.val)
+	case "random_gaussian":
+		lb, err := f.argAsNumber(0, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+		}
+		ub, err := f.argAsNumber(1, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+		}
+		param, err := f.argAsNumber(2, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+		}
+
+		if lb.isDouble || ub.isDouble {
+			return nil, fmt.Errorf("interval for random() must be integers, not doubles, in %s", f.String())
+		}
+
+		if lb.iVal == ub.iVal {
+			return lb.iVal, nil
+		}
+
+		min, max := lb.iVal, ub.iVal
+		return gaussianRand(ctx.Rand, min, max, param.val)
 	case "*":
 		a, err := f.argAsNumber(0, ctx)
 		if err != nil {
@@ -589,6 +704,82 @@ func (f CallExpr) Eval(ctx *CommandContext) (interface{}, error) {
 	default:
 		return nil, fmt.Errorf("unknown function: %s", f.String())
 	}
+}
+
+const minGaussianParam = 2.0
+
+/* translated from pgbench.c */
+func gaussianRand(random *rand.Rand, min, max int64, parameter float64) (int64, error) {
+	var stdev float64
+
+	/* abort if parameter is too low, but must really be checked beforehand */
+	if parameter < minGaussianParam {
+		return 0, fmt.Errorf("random_gaussian 'parameter' argument must be greater than %f", minGaussianParam)
+	}
+
+	/*
+	 * Get user specified random number from this loop, with -parameter <
+	 * stdev <= parameter
+	 *
+	 * This loop is executed until the number is in the expected range.
+	 *
+	 * As the minimum parameter is 2.0, the probability of looping is low:
+	 * sqrt(-2 ln(r)) <= 2 => r >= e^{-2} ~ 0.135, then when taking the
+	 * average sinus multiplier as 2/pi, we have a 8.6% looping probability in
+	 * the worst case. For a parameter value of 5.0, the looping probability
+	 * is about e^{-5} * 2 / pi ~ 0.43%.
+	 */
+	for {
+		/*
+		 * random.Float64() generates [0,1), but for the basic version of the
+		 * Box-Muller transform the two uniformly distributed random numbers
+		 * are expected in (0, 1] (see
+		 * https://en.wikipedia.org/wiki/Box-Muller_transform)
+		 */
+		rand1 := 1.0 - random.Float64()
+		rand2 := 1.0 - random.Float64()
+
+		/* Box-Muller basic form transform */
+		sqrtVal := math.Sqrt(-2.0 * math.Log(rand1))
+
+		stdev = sqrtVal * math.Sin(2.0*math.Pi*rand2)
+
+		/*
+		 * we may try with cos, but there may be a bias induced if the
+		 * previous value fails the test. To be on the safe side, let us try
+		 * over.
+		 */
+		if !(stdev < -parameter || stdev >= parameter) {
+			break
+		}
+	}
+
+	/* stdev is in [-parameter, parameter), normalization to [0,1) */
+	randVal := (stdev + parameter) / (parameter * 2.0)
+
+	/* return int64 random number within between min and max */
+	return min + int64(float64(max-min+1)*randVal), nil
+}
+
+/* translated from pgbench.c */
+func exponentialRand(random *rand.Rand, min, max int64, parameter float64) (int64, error) {
+	/* abort if wrong parameter, but must really be checked beforehand */
+	if parameter < 0.0 {
+		return 0, fmt.Errorf("parameter argument to random_exponential needs to be > 0")
+	}
+	cut := math.Exp(-parameter)
+	/* erand in [0, 1), uniform in (0, 1] */
+	uniform := 1.0 - random.Float64()
+
+	/*
+	 * inner expression in (cut, 1] (if parameter > 0), rand in [0, 1)
+	 */
+	if (1.0 - cut) == 0 {
+		return 0, fmt.Errorf("random_exponential divide by zero error, please pick a different parameter value")
+	}
+	randVal := -math.Log(cut+(1.0-cut)*uniform) / parameter
+	/* return int64 random number within between min and max */
+	return min + int64(float64(max-min+1)*randVal), nil
 }
 
 // Hacky first stab at dealing with runtime coercion, refactor as needed

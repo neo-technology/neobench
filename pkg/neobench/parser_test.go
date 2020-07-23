@@ -1,10 +1,12 @@
 package neobench
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/stretchr/testify/assert"
 	"math"
 	"testing"
+	"time"
 )
 
 func TestParseTpcBLike(t *testing.T) {
@@ -37,6 +39,67 @@ func TestParseTpcBLike(t *testing.T) {
 			Params: params,
 		},
 	}, uow.Statements)
+}
+
+func TestSleep(t *testing.T) {
+	wrk, err := Parse("sleep", `\set sleeptime 13
+\sleep :sleeptime us
+RETURN 1;`, 1, 1337)
+
+	assert.NoError(t, err)
+	clientWork := wrk.NewClient()
+	uow, err := clientWork.Next()
+	assert.NoError(t, err)
+	assert.Equal(t, []Statement{
+		{
+			Query:  "RETURN 1",
+			Params: map[string]interface{}{"sleeptime": int64(13), "scale": int64(1)},
+		},
+	}, uow.Statements)
+}
+
+func TestSleepDuration(t *testing.T) {
+	tests := map[string]struct {
+		expectSleepDuration time.Duration
+		expectError         error
+	}{
+		"\\sleep 10": {
+			expectSleepDuration: 10 * time.Second,
+		},
+		"\\sleep 10 s": {
+			expectSleepDuration: 10 * time.Second,
+		},
+		"\\sleep 10s": {
+			expectSleepDuration: 10 * time.Second,
+		},
+		"\\sleep 10 ms": {
+			expectSleepDuration: 10 * time.Millisecond,
+		},
+		"\\sleep 10 us": {
+			expectSleepDuration: 10 * time.Microsecond,
+		},
+		"\\sleep 10 days": {
+			expectError: fmt.Errorf("\\sleep command must use 'us', 'ms', or 's' unit argument - or none. got: days (at testSleep:'\\sleep 10 days':1:15)"),
+		},
+	}
+
+	for given, tc := range tests {
+		given, tc := given, tc
+		t.Run(given, func(t *testing.T) {
+			wrk, err := Parse(fmt.Sprintf("testSleep:'%s'", given), given, 1, 1337)
+
+			if tc.expectError != nil {
+				assert.Equal(t, tc.expectError, err)
+				return
+			}
+
+			assert.NoError(t, err)
+			clientWork := wrk.NewClient()
+			cmd := clientWork.Commands[0].(SleepCommand)
+			actualDurationBase, err := cmd.Duration.Eval(nil)
+			assert.Equal(t, tc.expectSleepDuration, time.Duration(actualDurationBase.(int64))*cmd.Unit)
+		})
+	}
 }
 
 func TestExpressions(t *testing.T) {
@@ -77,21 +140,23 @@ func TestExpressions(t *testing.T) {
 		"(1 * (2 + (1)))": int64(3),
 
 		// Functions
-		"abs(-17)":                  int64(17),
-		"abs(-17.6)":                17.6,
-		"double(5432)":              float64(5432),
-		"double(5432.0)":            float64(5432),
-		"greatest(5, 4, 3, 2)":      int64(5),
-		"greatest(-5, -4, -3, -2)":  int64(-2),
-		"greatest(5, 4, 3, 2.0, 8)": float64(8),
-		"least(5, 4, 3, 2)":         int64(2),
-		"least(5, 4, 3, 2.0, 8)":    2.0,
-		"least(-5, -4, -3, -2)":     int64(-5),
-		"int(5.4 + 3.8)":            int64(9),
-		"int(5 + 4)":                int64(9),
-		"pi()":                      math.Pi,
-		"random(1, 5)":              int64(2),
-		"sqrt(2.0)":                 1.414213562,
+		"abs(-17)":                       int64(17),
+		"abs(-17.6)":                     17.6,
+		"double(5432)":                   float64(5432),
+		"double(5432.0)":                 float64(5432),
+		"greatest(5, 4, 3, 2)":           int64(5),
+		"greatest(-5, -4, -3, -2)":       int64(-2),
+		"greatest(5, 4, 3, 2.0, 8)":      float64(8),
+		"least(5, 4, 3, 2)":              int64(2),
+		"least(5, 4, 3, 2.0, 8)":         2.0,
+		"least(-5, -4, -3, -2)":          int64(-5),
+		"int(5.4 + 3.8)":                 int64(9),
+		"int(5 + 4)":                     int64(9),
+		"pi()":                           math.Pi,
+		"random(1, 5)":                   int64(2),
+		"random_gaussian(1, 10, 2.5)":    int64(6),
+		"random_exponential(1, 10, 2.5)": int64(4),
+		"sqrt(2.0)":                      1.414213562,
 	}
 
 	for expr, expected := range tc {
@@ -115,4 +180,21 @@ RETURN 1;`, expr), 1, 1337)
 			}
 		})
 	}
+}
+
+func TestDebugFunction(t *testing.T) {
+	wrk, err := Parse("test:debug(..)", "\\set blah debug(1337) * 10\nRETURN 1;", 1, 1337)
+
+	assert.NoError(t, err)
+	if err != nil {
+		return
+	}
+
+	stderr := bytes.NewBuffer(nil)
+	clientWork := wrk.NewClient()
+	clientWork.Stderr = stderr
+	uow, err := clientWork.Next()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(13370), uow.Statements[0].Params["blah"])
+	assert.Equal(t, "1337\n", stderr.String())
 }
