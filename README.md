@@ -51,7 +51,7 @@ The variables are available to subsequent meta-commands and as parameters in you
 Here is a small example with two meta-commands and one query:
 
     \set numPeople $scale * 1000000
-    \set personId random() * numPeople
+    \set personId random() * $numPeople
     MATCH (p:Person {id: $personId}) RETURN p;
 
 Scripts are currently ran as a single transaction, though that may change before 1.0.
