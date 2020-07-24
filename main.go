@@ -85,9 +85,21 @@ Usage:
 
 	switch *benchmarkMode {
 	case "throughput":
-		os.Exit(runThroughputBenchmark(driver, scenario, out, wrk, runtime))
+		result, err := runBenchmark(driver, scenario, out, wrk, runtime)
+		if err != nil {
+			out.Errorf(err.Error())
+			os.Exit(1)
+		}
+		out.ReportThroughput(result)
+		os.Exit(0)
 	case "latency":
-		os.Exit(runLatencyBenchmark(driver, scenario, out, wrk, runtime))
+		result, err := runBenchmark(driver, scenario, out, wrk, runtime)
+		if err != nil {
+			out.Errorf(err.Error())
+			os.Exit(1)
+		}
+		out.ReportLatency(result)
+		os.Exit(0)
 	default:
 		fmt.Printf("unknown mode: %s, supported modes are 'latency' and 'throughput'", *benchmarkMode)
 		os.Exit(1)
@@ -111,14 +123,17 @@ func describeScenario() string {
 	return out.String()
 }
 
-func runLatencyBenchmark(driver neo4j.Driver, scenario string, out neobench.Output, wrk neobench.Workload, runtime time.Duration) int {
+func runBenchmark(driver neo4j.Driver, scenario string, out neobench.Output, wrk neobench.Workload, runtime time.Duration) (neobench.Result, error) {
 	stopCh, stop := neobench.SetupSignalHandler()
 	defer stop()
 
-	ratePerWorkerPerSecond := *rate / float64(*clients)
-	ratePerWorkerDuration := time.Duration(1000*1000/ratePerWorkerPerSecond) * time.Microsecond
+	ratePerWorkerDuration := time.Duration(0)
+	if *benchmarkMode == "latency" {
+		ratePerWorkerPerSecond := *rate / float64(*clients)
+		ratePerWorkerDuration = time.Duration(1000*1000/ratePerWorkerPerSecond) * time.Microsecond
+	}
 
-	resultChan := make(chan workerLatencyResult, *clients)
+	resultChan := make(chan neobench.WorkerResult, *clients)
 	var wg sync.WaitGroup
 	for i := 0; i < *clients; i++ {
 		wg.Add(1)
@@ -127,20 +142,11 @@ func runLatencyBenchmark(driver neo4j.Driver, scenario string, out neobench.Outp
 		clientWork := wrk.NewClient()
 		go func() {
 			defer wg.Done()
-			result, err := worker.RunLatencyBenchmark(clientWork, ratePerWorkerDuration, stopCh)
-			if err != nil {
-				out.Errorf("worker %d crashed: %s", workerId, err)
+			result := worker.RunBenchmark(clientWork, ratePerWorkerDuration, stopCh)
+			resultChan <- result
+			if result.Error != nil {
+				out.Errorf("worker %d crashed: %s", workerId, result.Error)
 				stop()
-				resultChan <- workerLatencyResult{
-					workerId: workerId,
-					err:      err,
-				}
-				return
-			}
-
-			resultChan <- workerLatencyResult{
-				workerId: workerId,
-				hdr:      result,
 			}
 		}()
 	}
@@ -160,142 +166,57 @@ func runLatencyBenchmark(driver neo4j.Driver, scenario string, out neobench.Outp
 	})
 	wg.Wait()
 
-	return processLatencyResults(scenario, out, *clients, resultChan)
+	return collectResults(scenario, out, *clients, resultChan)
 }
 
-func runThroughputBenchmark(driver neo4j.Driver, scenario string, out neobench.Output, wrk neobench.Workload, runtime time.Duration) int {
-	stopCh, stop := neobench.SetupSignalHandler()
-	defer stop()
-
-	resultChan := make(chan workerThroughputResult, *clients)
-	var wg sync.WaitGroup
-	for i := 0; i < *clients; i++ {
-		wg.Add(1)
-		worker := neobench.NewWorker(driver)
-		workerId := i
-		clientWork := wrk.NewClient()
-		go func() {
-			defer wg.Done()
-			result, err := worker.RunThroughputBenchmark(clientWork, stopCh)
-			if err != nil {
-				out.Errorf("worker %d crashed: %s", workerId, err)
-				stop()
-				resultChan <- workerThroughputResult{
-					workerId: workerId,
-					err:      err,
-				}
-				return
-			}
-
-			resultChan <- workerThroughputResult{
-				workerId:      workerId,
-				ratePerSecond: result,
-			}
-		}()
-	}
-
-	out.ReportProgress(neobench.ProgressReport{
-		Section:      "benchmark",
-		Step:         "run",
-		Completeness: 0,
-	})
-	deadline := time.Now().Add(runtime)
-	awaitCompletion(stopCh, deadline, out)
-	stop()
-	out.ReportProgress(neobench.ProgressReport{
-		Section:      "benchmark",
-		Step:         "stopping",
-		Completeness: 0,
-	})
-	wg.Wait()
-
-	return processThroughputResults(scenario, out, *clients, resultChan)
-}
-
-func processLatencyResults(scenario string, out neobench.Output, concurrency int, resultChan chan workerLatencyResult) int {
+func collectResults(scenario string, out neobench.Output, concurrency int, resultChan chan neobench.WorkerResult) (neobench.Result, error) {
 	// Collect results
-	results := make([]workerLatencyResult, 0, concurrency)
+	results := make([]neobench.WorkerResult, 0, concurrency)
 	for i := 0; i < concurrency; i++ {
 		results = append(results, <-resultChan)
 	}
 
+	total := neobench.Result{
+		Scenario:           scenario,
+		FailedByErrorGroup: make(map[string]neobench.FailureGroup),
+		Workers:            results,
+	}
 	// Process results into one histogram and check for errors
 	var combinedHistogram *hdrhistogram.Histogram
 	for _, res := range results {
-		if res.err != nil {
-			out.Errorf("Worker failed: %v", res.err)
+		if res.Error != nil {
+			out.Errorf("Worker failed: %v", res.Error)
 			continue
 		}
 		if combinedHistogram == nil {
 			// Copy the first one, we merge the others into this
-			combinedHistogram = hdrhistogram.Import(res.hdr.Export())
+			combinedHistogram = hdrhistogram.Import(res.Latencies.Export())
 		} else {
-			combinedHistogram.Merge(res.hdr)
+			combinedHistogram.Merge(res.Latencies)
+		}
+		total.TotalRate += res.Rate
+		total.TotalSucceeded += res.Succeeded
+		total.TotalFailed += res.Failed
+		for name, group := range res.FailedByErrorGroup {
+			existing, found := total.FailedByErrorGroup[name]
+			if found {
+				total.FailedByErrorGroup[name] = neobench.FailureGroup{
+					Count:        existing.Count + group.Count,
+					FirstFailure: existing.FirstFailure,
+				}
+			} else {
+				total.FailedByErrorGroup[name] = group
+			}
 		}
 	}
 
-	// Report findings
 	if combinedHistogram == nil {
-		out.Errorf("all workers failed")
-		return 1
-	}
-	out.ReportLatencyResult(neobench.LatencyResult{
-		Scenario:       scenario,
-		TotalHistogram: combinedHistogram,
-	})
-	return 0
-}
-
-func processThroughputResults(scenario string, out neobench.Output, concurrency int, resultChan chan workerThroughputResult) int {
-	// Collect results
-	out.ReportProgress(neobench.ProgressReport{
-		Section:      "benchmark",
-		Step:         "collect-results",
-		Completeness: 0,
-	})
-	results := make([]workerThroughputResult, 0, concurrency)
-	for i := 0; i < concurrency; i++ {
-		out.ReportProgress(neobench.ProgressReport{
-			Section:      "benchmark",
-			Step:         "collect-results",
-			Completeness: float64(i) / float64(concurrency),
-		})
-		results = append(results, <-resultChan)
+		return neobench.Result{}, fmt.Errorf("all workers failed")
 	}
 
-	totalRatePerSecond := 0.0
-	allFailed := false
-	for _, res := range results {
-		if res.err != nil {
-			out.Errorf("worker failed: %v", res.err)
-			continue
-		}
-		allFailed = false
-		totalRatePerSecond += res.ratePerSecond
-	}
+	total.TotalLatencies = combinedHistogram
 
-	// Report findings
-	if allFailed {
-		out.Errorf("all workers failed")
-		return 1
-	}
-	out.ReportThroughputResult(neobench.ThroughputResult{
-		Scenario:           scenario,
-		TotalRatePerSecond: totalRatePerSecond,
-	})
-	return 0
-}
-
-type workerLatencyResult struct {
-	workerId int
-	hdr      *hdrhistogram.Histogram
-	err      error
-}
-
-type workerThroughputResult struct {
-	workerId      int
-	ratePerSecond float64
-	err           error
+	return total, nil
 }
 
 func initWorkload(path string, scale int64, driver neo4j.Driver, out neobench.Output) error {

@@ -20,15 +20,22 @@ type ThroughputResult struct {
 	TotalRatePerSecond float64
 }
 
-type LatencyResult struct {
-	Scenario       string
-	TotalHistogram *hdrhistogram.Histogram
+type Result struct {
+	Scenario           string
+	TotalLatencies     *hdrhistogram.Histogram
+	TotalRate          float64
+	TotalFailed        int64
+	TotalSucceeded     int64
+	FailedByErrorGroup map[string]FailureGroup
+
+	// Per-worker results
+	Workers []WorkerResult
 }
 
 type Output interface {
 	ReportProgress(report ProgressReport)
-	ReportThroughputResult(result ThroughputResult)
-	ReportLatencyResult(result LatencyResult)
+	ReportThroughput(result Result)
+	ReportLatency(result Result)
 	Errorf(format string, a ...interface{})
 }
 
@@ -84,12 +91,15 @@ func (o *InteractiveOutput) ReportProgress(report ProgressReport) {
 	}
 }
 
-func (o *InteractiveOutput) ReportThroughputResult(result ThroughputResult) {
+func (o *InteractiveOutput) ReportThroughput(result Result) {
 	s := strings.Builder{}
 
-	s.WriteString("== Benchmark Completed! ==\n")
+	s.WriteString("== Results ==\n")
 	s.WriteString(fmt.Sprintf("Scenario: %s\n", result.Scenario))
-	s.WriteString(fmt.Sprintf("Rate: %.03f transactions per second\n", result.TotalRatePerSecond))
+	s.WriteString(fmt.Sprintf("Successful Transactions: %d\n", result.TotalSucceeded))
+	s.WriteString("\n")
+	s.WriteString(fmt.Sprintf("Rate: %.03f successful transactions per second\n", result.TotalRate))
+	o.reportErrors(result, &s)
 
 	_, err := fmt.Fprintf(o.OutStream, s.String())
 	if err != nil {
@@ -97,33 +107,52 @@ func (o *InteractiveOutput) ReportThroughputResult(result ThroughputResult) {
 	}
 }
 
-func (o *InteractiveOutput) ReportLatencyResult(result LatencyResult) {
-	histo := result.TotalHistogram
+func (o *InteractiveOutput) ReportLatency(result Result) {
+	histo := result.TotalLatencies
 
 	s := strings.Builder{}
 
-	s.WriteString("== Benchmark Completed! ==\n")
+	s.WriteString("== Results ==\n")
+
 	s.WriteString(fmt.Sprintf("Scenario: %s\n", result.Scenario))
-	s.WriteString(fmt.Sprintf("Total Transactions: %d\n", histo.TotalCount()))
-	s.WriteString("\n")
-	s.WriteString(fmt.Sprintf("Latency summary:\n"))
-	s.WriteString(fmt.Sprintf("  Min:    %.3fms\n", float64(histo.Min())/1000.0))
-	s.WriteString(fmt.Sprintf("  Mean:   %.3fms\n", histo.Mean()/1000.0))
-	s.WriteString(fmt.Sprintf("  Max:    %.3fms\n", float64(histo.Max())/1000.0))
-	s.WriteString(fmt.Sprintf("  Stddev: %.3fms\n", histo.StdDev()/1000.0))
-	s.WriteString("\n")
-	s.WriteString(fmt.Sprintf("Latency distribution:\n"))
-	s.WriteString(fmt.Sprintf("  P50.000: %.03fms\n", float64(histo.ValueAtQuantile(50))/1000.0))
-	s.WriteString(fmt.Sprintf("  P75.000: %.03fms\n", float64(histo.ValueAtQuantile(75))/1000.0))
-	s.WriteString(fmt.Sprintf("  P95.000: %.03fms\n", float64(histo.ValueAtQuantile(95))/1000.0))
-	s.WriteString(fmt.Sprintf("  P99.000: %.03fms\n", float64(histo.ValueAtQuantile(99))/1000.0))
-	s.WriteString(fmt.Sprintf("  P99.999: %.03fms\n", float64(histo.ValueAtQuantile(99.999))/1000.0))
+	s.WriteString(fmt.Sprintf("Successful Transactions: %d\n", histo.TotalCount()))
+	if result.TotalSucceeded > 0 {
+		s.WriteString("\n")
+		s.WriteString(fmt.Sprintf("Latency summary:\n"))
+		s.WriteString(fmt.Sprintf("  Min:    %.3fms\n", float64(histo.Min())/1000.0))
+		s.WriteString(fmt.Sprintf("  Mean:   %.3fms\n", histo.Mean()/1000.0))
+		s.WriteString(fmt.Sprintf("  Max:    %.3fms\n", float64(histo.Max())/1000.0))
+		s.WriteString(fmt.Sprintf("  Stddev: %.3fms\n", histo.StdDev()/1000.0))
+		s.WriteString("\n")
+		s.WriteString(fmt.Sprintf("Latency distribution:\n"))
+		s.WriteString(fmt.Sprintf("  P50.000: %.03fms\n", float64(histo.ValueAtQuantile(50))/1000.0))
+		s.WriteString(fmt.Sprintf("  P75.000: %.03fms\n", float64(histo.ValueAtQuantile(75))/1000.0))
+		s.WriteString(fmt.Sprintf("  P95.000: %.03fms\n", float64(histo.ValueAtQuantile(95))/1000.0))
+		s.WriteString(fmt.Sprintf("  P99.000: %.03fms\n", float64(histo.ValueAtQuantile(99))/1000.0))
+		s.WriteString(fmt.Sprintf("  P99.999: %.03fms\n", float64(histo.ValueAtQuantile(99.999))/1000.0))
+	}
+	o.reportErrors(result, &s)
 
 	_, err := fmt.Fprint(o.OutStream, s.String())
 	if err != nil {
 		panic(err)
 	}
+}
 
+func (o *InteractiveOutput) reportErrors(result Result, s *strings.Builder) {
+	s.WriteString("\n")
+	s.WriteString(fmt.Sprintf("Error stats:\n"))
+	if result.TotalFailed == 0 {
+		s.WriteString(fmt.Sprintf("  No errors!\n"))
+	} else {
+		s.WriteString(fmt.Sprintf("  Failed transactions: %d (%.3f %%)\n", result.TotalFailed, 100*float64(result.TotalFailed)/float64(result.TotalFailed+result.TotalSucceeded)))
+		s.WriteString(fmt.Sprintf("\n"))
+		s.WriteString(fmt.Sprintf("  Causes:\n"))
+		for name, info := range result.FailedByErrorGroup {
+			s.WriteString(fmt.Sprintf("    %s: %d failures\n", name, info.Count))
+			s.WriteString(fmt.Sprintf("      (ex: %s)\n", info.FirstFailure))
+		}
+	}
 }
 
 func (o *InteractiveOutput) Errorf(format string, a ...interface{}) {
@@ -156,19 +185,41 @@ func (o *CsvOutput) ReportProgress(report ProgressReport) {
 	}
 }
 
-func (o *CsvOutput) ReportThroughputResult(result ThroughputResult) {
-	_, err := fmt.Fprintf(o.OutStream, "scenario,transactions_per_second\n\"%s\",%.03f\n", result.Scenario, result.TotalRatePerSecond)
+func (o *CsvOutput) ReportThroughput(result Result) {
+	columns := []string{"scenario", "succeeded", "failed", "transactions_per_second"}
+	row := []float64{
+		float64(result.TotalSucceeded),
+		float64(result.TotalFailed),
+		result.TotalRate,
+	}
+
+	s := strings.Builder{}
+	separator := ","
+	s.WriteString(strings.Join(columns, separator))
+	s.WriteString("\n")
+
+	for i, cell := range row {
+		if i > 0 {
+			s.WriteString(separator)
+		}
+		s.WriteString(fmt.Sprintf("%.03f", cell))
+	}
+	s.WriteString("\n")
+
+	_, err := fmt.Fprint(o.OutStream, s.String())
 	if err != nil {
 		panic(err)
 	}
+
 }
 
-func (o *CsvOutput) ReportLatencyResult(result LatencyResult) {
-	histo := result.TotalHistogram
+func (o *CsvOutput) ReportLatency(result Result) {
+	histo := result.TotalLatencies
 
-	columns := []string{"scenario", "samples", "min_ms", "mean_ms", "max_ms", "stdev", "p50_ms", "p75_ms", "p99_ms", "p99999_ms"}
+	columns := []string{"scenario", "succeeded", "failed", "min_ms", "mean_ms", "max_ms", "stdev", "p50_ms", "p75_ms", "p99_ms", "p99999_ms"}
 	row := []float64{
 		float64(histo.TotalCount()),
+		float64(result.TotalFailed),
 		float64(histo.Min()) / 1000.0,
 		histo.Mean() / 1000.0,
 		float64(histo.Max()) / 1000.0,
