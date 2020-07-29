@@ -32,14 +32,14 @@ test_tpcb_like() {
   setup_db
 
   "${NEOBENCH_PATH}" -i -p secret -w builtin:tpcb-like -d 5
-  "${NEOBENCH_PATH}" -i -p secret -w builtin:tpcb-like -d 5 -m latency
+  "${NEOBENCH_PATH}" -i -p secret -w builtin:tpcb-like -d 5 --latency
 }
 
 test_custom_script() {
   setup_db
 
-  "${NEOBENCH_PATH}" -p secret -w "${SCRIPTPATH}/test.script" -d 5
-  "${NEOBENCH_PATH}" -p secret -w "${SCRIPTPATH}/test.script" -d 5 -m latency
+  "${NEOBENCH_PATH}" -p secret -w "${SCRIPTPATH}/test.script" -d 5 --define myvar=12
+  "${NEOBENCH_PATH}" -p secret -w "${SCRIPTPATH}/test.script" -d 5 --define myvar=12 --latency
 }
 
 setup_db() {

@@ -4,37 +4,55 @@ import (
 	"flag"
 	"fmt"
 	"github.com/codahale/hdrhistogram"
+	"github.com/neo4j/neo4j-go-driver/neo4j"
+	"github.com/spf13/pflag"
 	"io/ioutil"
 	"log"
 	"neobench/pkg/neobench"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
-import "github.com/neo4j/neo4j-go-driver/neo4j"
 
-var initMode = flag.Bool("i", false, "initialize dataset before running workload")
-var scale = flag.Int64("s", 1, "scale factor, effect depends on workload but in general this scales the size of the dataset linearly")
-var clients = flag.Int("c", 1, "number of clients, ie. number of concurrent simulated database sessions")
-var rate = flag.Float64("r", 1, "in latency mode (see -m) this sets transactions per second, total across all clients. This can be set to a fraction if you want")
-var url = flag.String("a", "neo4j://localhost:7687", "address to connect to, eg. bolt+routing://mydb:7687")
-var user = flag.String("u", "neo4j", "username")
-var password = flag.String("p", "neo4j", "password")
-var encryption = flag.String("e", "auto", "whether to use encryption, `auto`, `true` or `false`")
-var duration = flag.Int("d", 60, "seconds to run")
-var workloadPath = flag.String("w", "builtin:tpcb-like", "workload to run")
-var benchmarkMode = flag.String("m", "throughput", "benchmark mode: throughput or latency, latency uses a fixed rate workload, see -r")
-var outputFormat = flag.String("o", "auto", "output report format, `auto`, `interactive` or `csv`; auto uses `interactive` stdout is to a terminal, otherwise csv")
+var fInitMode bool
+var fLatencyMode bool
+var fScale int64
+var fClients int
+var fRate float64
+var fAddress string
+var fUser string
+var fPassword string
+var fEncryptionMode string
+var fDuration int
+var fVariables map[string]string
+var fWorkloadPath string
+var fOutputFormat string
+
+func init() {
+	pflag.BoolVarP(&fInitMode, "init", "i", false, "run in initialization mode; if using built-in workloads this creates the initial dataset")
+	pflag.Int64VarP(&fScale, "scale", "s", 1, "sets the `scale` variable, impact depends on workload")
+	pflag.IntVarP(&fClients, "clients", "c", 1, "number of concurrent clients / sessions")
+	pflag.Float64VarP(&fRate, "rate", "r", 1, "in latency mode (see -l) this sets transactions per second, total across all clients")
+	pflag.StringVarP(&fAddress, "address", "a", "neo4j://localhost:7687", "address to connect to, eg. neo4j://mydb:7687")
+	pflag.StringVarP(&fUser, "user", "u", "neo4j", "username")
+	pflag.StringVarP(&fPassword, "password", "p", "neo4j", "password")
+	pflag.StringVarP(&fEncryptionMode, "encryption", "e", "auto", "whether to use encryption, `auto`, `true` or `false`")
+	pflag.IntVarP(&fDuration, "duration", "d", 60, "seconds to run")
+	pflag.StringToStringVarP(&fVariables, "define", "D", nil, "defines variables for workload scripts and query parameters")
+	pflag.StringVarP(&fWorkloadPath, "workload", "w", "builtin:tpcb-like", "workload to run, either a builtin: one or a path to a workload script")
+	pflag.BoolVarP(&fLatencyMode, "latency", "l", false, "run in latency testing more rather than throughput mode")
+	pflag.StringVarP(&fOutputFormat, "output", "o", "auto", "output format, `auto`, `interactive` or `csv`")
+}
 
 func main() {
-	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), `
-neobench - scriptable workload generator for Neo4j
+	pflag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), `neobench - scriptable benchmarks for Neo4j
 
-  neobench runs a canned or user-defined workload against a specified Neo4j Database.
+  neobench runs a canned or user-defined workload against a Neo4j Database.
   By default, it measures the maximum throughput it can achieve, but it can also
-  measure latencies, automatically correcting for coordinated omission.
+  measure latencies.
 
   There is one built-in workload, used by default: builtin:tpcb-like, it is very 
   similar to the tpcb-like workload found in pgbench.
@@ -42,20 +60,21 @@ neobench - scriptable workload generator for Neo4j
 Usage:
 
 `)
-		flag.PrintDefaults()
+		pflag.PrintDefaults()
 	}
-	flag.Parse()
+	pflag.Parse()
+
 	seed := time.Now().Unix()
-	runtime := time.Duration(*duration) * time.Second
+	runtime := time.Duration(fDuration) * time.Second
 	scenario := describeScenario()
 
-	out, err := neobench.NewOutput(*outputFormat)
+	out, err := neobench.NewOutput(fOutputFormat)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	var encryptionMode neobench.EncryptionMode
-	switch strings.ToLower(*encryption) {
+	switch strings.ToLower(fEncryptionMode) {
 	case "auto":
 		encryptionMode = neobench.EncryptionAuto
 	case "true", "yes", "y", "1":
@@ -63,79 +82,91 @@ Usage:
 	case "false", "no", "n", "0":
 		encryptionMode = neobench.EncryptionOff
 	default:
-		log.Fatalf("Invalid encryption mode '%s', needs to be one of 'auto', 'true' or 'false'", *encryption)
+		log.Fatalf("Invalid encryption mode '%s', needs to be one of 'auto', 'true' or 'false'", fEncryptionMode)
 	}
 
-	driver, err := neobench.NewDriver(*url, *user, *password, encryptionMode)
+	driver, err := neobench.NewDriver(fAddress, fUser, fPassword, encryptionMode)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	wrk, err := createWorkload(*workloadPath, *scale, seed)
+	variables := make(map[string]interface{})
+	variables["scale"] = fScale
+	for k, v := range fVariables {
+		intVal, err := strconv.ParseInt(v, 10, 64)
+		if err == nil {
+			variables[k] = intVal
+			continue
+		}
+		floatVal, err := strconv.ParseFloat(v, 64)
+		if err == nil {
+			variables[k] = floatVal
+			continue
+		}
+		log.Fatalf("-D and --define values must be integers or floats, failing to parse '%s': %s", v, err)
+	}
+
+	wrk, err := createWorkload(fWorkloadPath, seed, variables)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	if *initMode {
-		err = initWorkload(*workloadPath, *scale, driver, out)
+	if fInitMode {
+		err = initWorkload(fWorkloadPath, fScale, driver, out)
 		if err != nil {
 			log.Fatal(err)
 		}
 	}
 
-	switch *benchmarkMode {
-	case "throughput":
-		result, err := runBenchmark(driver, scenario, out, wrk, runtime)
-		if err != nil {
-			out.Errorf(err.Error())
-			os.Exit(1)
-		}
-		out.ReportThroughput(result)
-		os.Exit(0)
-	case "latency":
-		result, err := runBenchmark(driver, scenario, out, wrk, runtime)
+	if fLatencyMode {
+		result, err := runBenchmark(driver, scenario, out, wrk, runtime, fLatencyMode, fClients, fRate)
 		if err != nil {
 			out.Errorf(err.Error())
 			os.Exit(1)
 		}
 		out.ReportLatency(result)
 		os.Exit(0)
-	default:
-		fmt.Printf("unknown mode: %s, supported modes are 'latency' and 'throughput'", *benchmarkMode)
-		os.Exit(1)
+	} else {
+		result, err := runBenchmark(driver, scenario, out, wrk, runtime, fLatencyMode, fClients, fRate)
+		if err != nil {
+			out.Errorf(err.Error())
+			os.Exit(1)
+		}
+		out.ReportThroughput(result)
+		os.Exit(0)
 	}
 }
 
 func describeScenario() string {
 	out := strings.Builder{}
-	out.WriteString(fmt.Sprintf("-m %s", *benchmarkMode))
-	out.WriteString(fmt.Sprintf(" -w %s", *workloadPath))
-	out.WriteString(fmt.Sprintf(" -c %d", *clients))
-	out.WriteString(fmt.Sprintf(" -s %d", *scale))
-	out.WriteString(fmt.Sprintf(" -d %d", *duration))
-	out.WriteString(fmt.Sprintf(" -e %s", *encryption))
-	if *benchmarkMode == "latency" {
-		out.WriteString(fmt.Sprintf(" -r %f", *rate))
+	out.WriteString(fmt.Sprintf(" -w %s", fWorkloadPath))
+	out.WriteString(fmt.Sprintf(" -c %d", fClients))
+	out.WriteString(fmt.Sprintf(" -s %d", fScale))
+	out.WriteString(fmt.Sprintf(" -d %d", fDuration))
+	out.WriteString(fmt.Sprintf(" -e %s", fEncryptionMode))
+	if fLatencyMode {
+		out.WriteString(fmt.Sprintf("-l -r %f", fRate))
 	}
-	if *initMode {
+	if fInitMode {
 		out.WriteString(" -i")
 	}
 	return out.String()
 }
 
-func runBenchmark(driver neo4j.Driver, scenario string, out neobench.Output, wrk neobench.Workload, runtime time.Duration) (neobench.Result, error) {
+func runBenchmark(driver neo4j.Driver, scenario string, out neobench.Output, wrk neobench.Workload, runtime time.Duration,
+	latencyMode bool, numClients int, rate float64) (neobench.Result, error) {
 	stopCh, stop := neobench.SetupSignalHandler()
 	defer stop()
 
 	ratePerWorkerDuration := time.Duration(0)
-	if *benchmarkMode == "latency" {
-		ratePerWorkerPerSecond := *rate / float64(*clients)
+	if latencyMode {
+		ratePerWorkerPerSecond := rate / float64(numClients)
 		ratePerWorkerDuration = time.Duration(1000*1000/ratePerWorkerPerSecond) * time.Microsecond
 	}
 
-	resultChan := make(chan neobench.WorkerResult, *clients)
+	resultChan := make(chan neobench.WorkerResult, numClients)
 	var wg sync.WaitGroup
-	for i := 0; i < *clients; i++ {
+	for i := 0; i < numClients; i++ {
 		wg.Add(1)
 		worker := neobench.NewWorker(driver)
 		workerId := i
@@ -166,7 +197,7 @@ func runBenchmark(driver neo4j.Driver, scenario string, out neobench.Output, wrk
 	})
 	wg.Wait()
 
-	return collectResults(scenario, out, *clients, resultChan)
+	return collectResults(scenario, out, numClients, resultChan)
 }
 
 func collectResults(scenario string, out neobench.Output, concurrency int, resultChan chan neobench.WorkerResult) (neobench.Result, error) {
@@ -226,9 +257,9 @@ func initWorkload(path string, scale int64, driver neo4j.Driver, out neobench.Ou
 	return fmt.Errorf("init option is only supported for built-in workloads; if you want to initialize a database for a custom script, simply set up the database as you prefer first")
 }
 
-func createWorkload(path string, scale, seed int64) (neobench.Workload, error) {
+func createWorkload(path string, seed int64, vars map[string]interface{}) (neobench.Workload, error) {
 	if path == "builtin:tpcb-like" {
-		return neobench.Parse("builtin:tpcp-like", neobench.TPCBLike, scale, seed)
+		return neobench.Parse("builtin:tpcp-like", neobench.TPCBLike, vars, seed)
 	}
 
 	scriptContent, err := ioutil.ReadFile(path)
@@ -236,7 +267,7 @@ func createWorkload(path string, scale, seed int64) (neobench.Workload, error) {
 		return neobench.Workload{}, fmt.Errorf("failed to read workload file at %s: %s", path, err)
 	}
 
-	return neobench.Parse(path, string(scriptContent), scale, seed)
+	return neobench.Parse(path, string(scriptContent), vars, seed)
 }
 
 func awaitCompletion(stopCh chan struct{}, deadline time.Time, out neobench.Output) {

@@ -36,6 +36,24 @@ Alternatively you can build from source by checking out this repo and running `m
     
     $ neobench -w myworkload.script 
 
+# Usage
+
+```
+  -a, --address string          address to connect to, eg. neo4j://mydb:7687 (default "neo4j://localhost:7687")
+  -c, --clients int             number of concurrent clients / sessions (default 1)
+  -D, --define stringToString   defines variables for workload scripts and query parameters (default [])
+  -d, --duration int            seconds to run (default 60)
+  -e, --encryption auto         whether to use encryption, auto, `true` or `false` (default "auto")
+  -i, --init                    run in initialization mode; if using built-in workloads this creates the initial dataset
+  -l, --latency                 run in latency testing more rather than throughput mode
+  -o, --output auto             output format, auto, `interactive` or `csv` (default "auto")
+  -p, --password string         password (default "neo4j")
+  -r, --rate float              in latency mode (see -l) this sets transactions per second, total across all clients (default 1)
+  -s, --scale scale             sets the scale variable, impact depends on workload (default 1)
+  -u, --user string             username (default "neo4j")
+  -w, --workload string         workload to run, either a builtin: one or a path to a workload script (default "builtin:tpcb-like")
+```
+
 # Custom scripts
 
 I aspire to support the same language as pgbench. 

@@ -14,36 +14,41 @@ import (
 
 type Workload struct {
 	Readonly bool
-	Scale    int64
-	Commands []Command
-	Rand     *rand.Rand
+	// set on command line and built in
+	Variables map[string]interface{}
+	Commands  []Command
+	Rand      *rand.Rand
 }
 
 func (s *Workload) NewClient() ClientWorkload {
 	return ClientWorkload{
-		Readonly: s.Readonly,
-		Scale:    s.Scale,
-		Commands: s.Commands,
-		Rand:     rand.New(rand.NewSource(s.Rand.Int63())),
-		Stderr:   os.Stderr,
+		Readonly:  s.Readonly,
+		Variables: s.Variables,
+		Commands:  s.Commands,
+		Rand:      rand.New(rand.NewSource(s.Rand.Int63())),
+		Stderr:    os.Stderr,
 	}
 }
 
 type ClientWorkload struct {
 	Readonly bool
-	Scale    int64
-	Commands []Command
-	Rand     *rand.Rand
-	Stderr   io.Writer
+	// variables set on command line and built-in
+	Variables map[string]interface{}
+	Commands  []Command
+	Rand      *rand.Rand
+	Stderr    io.Writer
 }
 
 func (s *ClientWorkload) Next() (UnitOfWork, error) {
+	vars := make(map[string]interface{})
+	for k, v := range s.Variables {
+		vars[k] = v
+	}
+
 	ctx := CommandContext{
 		Stderr: s.Stderr,
-		Vars: map[string]interface{}{
-			"scale": s.Scale,
-		},
-		Rand: s.Rand,
+		Vars:   vars,
+		Rand:   s.Rand,
 	}
 
 	uow := UnitOfWork{
@@ -128,7 +133,7 @@ func (c SleepCommand) Execute(ctx *CommandContext, uow *UnitOfWork) error {
 	return nil
 }
 
-func Parse(filename, script string, scale, seed int64) (Workload, error) {
+func Parse(filename, script string, vars map[string]interface{}, seed int64) (Workload, error) {
 	var s scanner.Scanner
 	s.Init(strings.NewReader(script))
 	s.Filename = filename
@@ -158,10 +163,10 @@ func Parse(filename, script string, scale, seed int64) (Workload, error) {
 	}
 
 	return Workload{
-		Readonly: false, // TODO
-		Scale:    scale,
-		Commands: commands,
-		Rand:     rand.New(rand.NewSource(seed)),
+		Readonly:  false, // TODO
+		Variables: vars,
+		Commands:  commands,
+		Rand:      rand.New(rand.NewSource(seed)),
 	}, nil
 }
 

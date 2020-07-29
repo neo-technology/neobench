@@ -10,12 +10,15 @@ import (
 )
 
 func TestParseTpcBLike(t *testing.T) {
-	wrk, err := Parse("builtin:tpcb-like", TPCBLike, 1, 1337)
+	wrk, err := Parse("builtin:tpcb-like", TPCBLike, map[string]interface{}{"scale": int64(1)}, 1337)
 
 	assert.NoError(t, err)
 	clientWork := wrk.NewClient()
 	uow, err := clientWork.Next()
 	assert.NoError(t, err)
+	if err != nil {
+		return
+	}
 	params := map[string]interface{}{"aid": int64(96828), "bid": int64(1), "delta": int64(4583), "scale": int64(1), "tid": int64(1)}
 	assert.Equal(t, []Statement{
 		{
@@ -44,7 +47,7 @@ func TestParseTpcBLike(t *testing.T) {
 func TestSleep(t *testing.T) {
 	wrk, err := Parse("sleep", `\set sleeptime 13
 \sleep $sleeptime us
-RETURN 1;`, 1, 1337)
+RETURN 1;`, map[string]interface{}{"scale": int64(1)}, 1337)
 
 	assert.NoError(t, err)
 	clientWork := wrk.NewClient()
@@ -86,7 +89,7 @@ func TestSleepDuration(t *testing.T) {
 	for given, tc := range tests {
 		given, tc := given, tc
 		t.Run(given, func(t *testing.T) {
-			wrk, err := Parse(fmt.Sprintf("testSleep:'%s'", given), given, 1, 1337)
+			wrk, err := Parse(fmt.Sprintf("testSleep:'%s'", given), given, map[string]interface{}{"scale": int64(1)}, 1337)
 
 			if tc.expectError != nil {
 				assert.Equal(t, tc.expectError, err)
@@ -163,7 +166,7 @@ func TestExpressions(t *testing.T) {
 		expr, expected := expr, expected
 		t.Run(expr, func(t *testing.T) {
 			wrk, err := Parse(fmt.Sprintf("expr:'%s'", expr), fmt.Sprintf(`\set v %s
-RETURN 1;`, expr), 1, 1337)
+RETURN 1;`, expr), map[string]interface{}{"scale": int64(1)}, 1337)
 
 			assert.NoError(t, err)
 			if err != nil {
@@ -183,7 +186,7 @@ RETURN 1;`, expr), 1, 1337)
 }
 
 func TestDebugFunction(t *testing.T) {
-	wrk, err := Parse("test:debug(..)", "\\set blah debug(1337) * 10\nRETURN 1;", 1, 1337)
+	wrk, err := Parse("test:debug(..)", "\\set blah debug(1337) * 10\nRETURN 1;", map[string]interface{}{"scale": int64(1)}, 1337)
 
 	assert.NoError(t, err)
 	if err != nil {
