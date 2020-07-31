@@ -5,21 +5,25 @@ import (
 	"fmt"
 	"github.com/stretchr/testify/assert"
 	"math"
+	"math/rand"
 	"testing"
 	"time"
 )
 
 func TestParseTpcBLike(t *testing.T) {
-	wrk, err := Parse("builtin:tpcb-like", TPCBLike, map[string]interface{}{"scale": int64(1)}, 1337)
+	vars := map[string]interface{}{"scale": int64(1)}
+	script, err := Parse("builtin:tpcb-like", TPCBLike, 1)
 
 	assert.NoError(t, err)
-	clientWork := wrk.NewClient()
-	uow, err := clientWork.Next()
+	uow, err := script.Eval(ScriptContext{
+		Vars: vars,
+		Rand: rand.New(rand.NewSource(1337)),
+	})
 	assert.NoError(t, err)
 	if err != nil {
 		return
 	}
-	params := map[string]interface{}{"aid": int64(96828), "bid": int64(1), "delta": int64(4583), "scale": int64(1), "tid": int64(1)}
+	params := map[string]interface{}{"aid": int64(90704), "bid": int64(1), "delta": int64(-3348), "scale": int64(1), "tid": int64(1)}
 	assert.Equal(t, []Statement{
 		{
 			Query:  "MATCH (account:Account {aid:$aid}) \nSET account.balance = account.balance + $delta",
@@ -45,13 +49,16 @@ func TestParseTpcBLike(t *testing.T) {
 }
 
 func TestSleep(t *testing.T) {
-	wrk, err := Parse("sleep", `\set sleeptime 13
+	vars := map[string]interface{}{"scale": int64(1)}
+	script, err := Parse("sleep", `\set sleeptime 13
 \sleep $sleeptime us
-RETURN 1;`, map[string]interface{}{"scale": int64(1)}, 1337)
+RETURN 1;`, 1)
 
 	assert.NoError(t, err)
-	clientWork := wrk.NewClient()
-	uow, err := clientWork.Next()
+	uow, err := script.Eval(ScriptContext{
+		Vars: vars,
+		Rand: rand.New(rand.NewSource(1337)),
+	})
 	assert.NoError(t, err)
 	assert.Equal(t, []Statement{
 		{
@@ -89,7 +96,7 @@ func TestSleepDuration(t *testing.T) {
 	for given, tc := range tests {
 		given, tc := given, tc
 		t.Run(given, func(t *testing.T) {
-			wrk, err := Parse(fmt.Sprintf("testSleep:'%s'", given), given, map[string]interface{}{"scale": int64(1)}, 1337)
+			script, err := Parse(fmt.Sprintf("testSleep:'%s'", given), given, 1)
 
 			if tc.expectError != nil {
 				assert.Equal(t, tc.expectError, err)
@@ -97,8 +104,7 @@ func TestSleepDuration(t *testing.T) {
 			}
 
 			assert.NoError(t, err)
-			clientWork := wrk.NewClient()
-			cmd := clientWork.Commands[0].(SleepCommand)
+			cmd := script.Commands[0].(SleepCommand)
 			actualDurationBase, err := cmd.Duration.Eval(nil)
 			assert.Equal(t, tc.expectSleepDuration, time.Duration(actualDurationBase.(int64))*cmd.Unit)
 		})
@@ -156,8 +162,8 @@ func TestExpressions(t *testing.T) {
 		"int(5.4 + 3.8)":                 int64(9),
 		"int(5 + 4)":                     int64(9),
 		"pi()":                           math.Pi,
-		"random(1, 5)":                   int64(2),
-		"random_gaussian(1, 10, 2.5)":    int64(6),
+		"random(1, 5)":                   int64(3),
+		"random_gaussian(1, 10, 2.5)":    int64(3),
 		"random_exponential(1, 10, 2.5)": int64(4),
 		"sqrt(2.0)":                      1.414213562,
 	}
@@ -165,15 +171,18 @@ func TestExpressions(t *testing.T) {
 	for expr, expected := range tc {
 		expr, expected := expr, expected
 		t.Run(expr, func(t *testing.T) {
-			wrk, err := Parse(fmt.Sprintf("expr:'%s'", expr), fmt.Sprintf(`\set v %s
-RETURN 1;`, expr), map[string]interface{}{"scale": int64(1)}, 1337)
+			vars := map[string]interface{}{"scale": int64(1)}
+			script, err := Parse(fmt.Sprintf("expr:'%s'", expr), fmt.Sprintf(`\set v %s
+RETURN 1;`, expr), 1)
 
 			assert.NoError(t, err)
 			if err != nil {
 				return
 			}
-			clientWork := wrk.NewClient()
-			uow, err := clientWork.Next()
+			uow, err := script.Eval(ScriptContext{
+				Vars: vars,
+				Rand: rand.New(rand.NewSource(1337)),
+			})
 			assert.NoError(t, err)
 			actual := uow.Statements[0].Params["v"]
 			if expectedFloat, ok := expected.(float64); ok {
@@ -186,7 +195,8 @@ RETURN 1;`, expr), map[string]interface{}{"scale": int64(1)}, 1337)
 }
 
 func TestDebugFunction(t *testing.T) {
-	wrk, err := Parse("test:debug(..)", "\\set blah debug(1337) * 10\nRETURN 1;", map[string]interface{}{"scale": int64(1)}, 1337)
+	vars := map[string]interface{}{"scale": int64(1)}
+	script, err := Parse("test:debug(..)", "\\set blah debug(1337) * 10\nRETURN 1;", 1)
 
 	assert.NoError(t, err)
 	if err != nil {
@@ -194,9 +204,11 @@ func TestDebugFunction(t *testing.T) {
 	}
 
 	stderr := bytes.NewBuffer(nil)
-	clientWork := wrk.NewClient()
-	clientWork.Stderr = stderr
-	uow, err := clientWork.Next()
+	uow, err := script.Eval(ScriptContext{
+		Stderr: stderr,
+		Vars:   vars,
+		Rand:   rand.New(rand.NewSource(1337)),
+	})
 	assert.NoError(t, err)
 	assert.Equal(t, int64(13370), uow.Statements[0].Params["blah"])
 	assert.Equal(t, "1337\n", stderr.String())

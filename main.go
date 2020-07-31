@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/pflag"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"neobench/pkg/neobench"
 	"os"
 	"strconv"
@@ -27,7 +28,7 @@ var fPassword string
 var fEncryptionMode string
 var fDuration int
 var fVariables map[string]string
-var fWorkloadPath string
+var fWorkloads []string
 var fOutputFormat string
 
 func init() {
@@ -41,7 +42,7 @@ func init() {
 	pflag.StringVarP(&fEncryptionMode, "encryption", "e", "auto", "whether to use encryption, `auto`, `true` or `false`")
 	pflag.IntVarP(&fDuration, "duration", "d", 60, "seconds to run")
 	pflag.StringToStringVarP(&fVariables, "define", "D", nil, "defines variables for workload scripts and query parameters")
-	pflag.StringVarP(&fWorkloadPath, "workload", "w", "builtin:tpcb-like", "workload to run, either a builtin: one or a path to a workload script")
+	pflag.StringSliceVarP(&fWorkloads, "workload", "w", []string{"builtin:tpcb-like"}, "workload to run, either a builtin: one or a path to a workload script")
 	pflag.BoolVarP(&fLatencyMode, "latency", "l", false, "run in latency testing more rather than throughput mode")
 	pflag.StringVarP(&fOutputFormat, "output", "o", "auto", "output format, `auto`, `interactive` or `csv`")
 }
@@ -106,13 +107,32 @@ Usage:
 		log.Fatalf("-D and --define values must be integers or floats, failing to parse '%s': %s", v, err)
 	}
 
-	wrk, err := createWorkload(fWorkloadPath, seed, variables)
-	if err != nil {
-		log.Fatal(err)
+	scripts := make([]neobench.Script, 0)
+	for _, path := range fWorkloads {
+		parts := strings.Split(path, "@")
+		weight := 1
+		if len(parts) > 1 {
+			weight, err = strconv.Atoi(parts[1])
+			if err != nil {
+				log.Fatalf("Failed to parse weight; value after @ symbol for workload weight must be an integer: %s", path)
+			}
+			path = parts[0]
+		}
+		script, err := createScript(path, uint(weight))
+		if err != nil {
+			log.Fatal(err)
+		}
+		scripts = append(scripts, script)
+	}
+
+	wrk := neobench.Workload{
+		Variables: variables,
+		Scripts:   neobench.NewScripts(scripts...),
+		Rand:      rand.New(rand.NewSource(seed)),
 	}
 
 	if fInitMode {
-		err = initWorkload(fWorkloadPath, fScale, driver, out)
+		err = initWorkload(fWorkloads, fScale, driver, out)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -139,7 +159,9 @@ Usage:
 
 func describeScenario() string {
 	out := strings.Builder{}
-	out.WriteString(fmt.Sprintf(" -w %s", fWorkloadPath))
+	for _, path := range fWorkloads {
+		out.WriteString(fmt.Sprintf(" -w %s", path))
+	}
 	out.WriteString(fmt.Sprintf(" -c %d", fClients))
 	out.WriteString(fmt.Sprintf(" -s %d", fScale))
 	out.WriteString(fmt.Sprintf(" -d %d", fDuration))
@@ -250,24 +272,26 @@ func collectResults(scenario string, out neobench.Output, concurrency int, resul
 	return total, nil
 }
 
-func initWorkload(path string, scale int64, driver neo4j.Driver, out neobench.Output) error {
-	if path == "builtin:tpcb-like" {
-		return neobench.InitTPCBLike(scale, driver, out)
+func initWorkload(paths []string, scale int64, driver neo4j.Driver, out neobench.Output) error {
+	for _, path := range paths {
+		if path == "builtin:tpcb-like" {
+			return neobench.InitTPCBLike(scale, driver, out)
+		}
 	}
-	return fmt.Errorf("init option is only supported for built-in workloads; if you want to initialize a database for a custom script, simply set up the database as you prefer first")
+	return nil
 }
 
-func createWorkload(path string, seed int64, vars map[string]interface{}) (neobench.Workload, error) {
+func createScript(path string, weight uint) (neobench.Script, error) {
 	if path == "builtin:tpcb-like" {
-		return neobench.Parse("builtin:tpcp-like", neobench.TPCBLike, vars, seed)
+		return neobench.Parse("builtin:tpcp-like", neobench.TPCBLike, weight)
 	}
 
 	scriptContent, err := ioutil.ReadFile(path)
 	if err != nil {
-		return neobench.Workload{}, fmt.Errorf("failed to read workload file at %s: %s", path, err)
+		return neobench.Script{}, fmt.Errorf("failed to read workload file at %s: %s", path, err)
 	}
 
-	return neobench.Parse(path, string(scriptContent), vars, seed)
+	return neobench.Parse(path, string(scriptContent), weight)
 }
 
 func awaitCompletion(stopCh chan struct{}, deadline time.Time, out neobench.Output) {

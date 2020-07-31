@@ -2,138 +2,15 @@ package neobench
 
 import (
 	"fmt"
-	"io"
 	"math"
 	"math/rand"
-	"os"
 	"strconv"
 	"strings"
 	"text/scanner"
 	"time"
 )
 
-type Workload struct {
-	Readonly bool
-	// set on command line and built in
-	Variables map[string]interface{}
-	Commands  []Command
-	Rand      *rand.Rand
-}
-
-func (s *Workload) NewClient() ClientWorkload {
-	return ClientWorkload{
-		Readonly:  s.Readonly,
-		Variables: s.Variables,
-		Commands:  s.Commands,
-		Rand:      rand.New(rand.NewSource(s.Rand.Int63())),
-		Stderr:    os.Stderr,
-	}
-}
-
-type ClientWorkload struct {
-	Readonly bool
-	// variables set on command line and built-in
-	Variables map[string]interface{}
-	Commands  []Command
-	Rand      *rand.Rand
-	Stderr    io.Writer
-}
-
-func (s *ClientWorkload) Next() (UnitOfWork, error) {
-	vars := make(map[string]interface{})
-	for k, v := range s.Variables {
-		vars[k] = v
-	}
-
-	ctx := CommandContext{
-		Stderr: s.Stderr,
-		Vars:   vars,
-		Rand:   s.Rand,
-	}
-
-	uow := UnitOfWork{
-		Readonly:   s.Readonly,
-		Statements: nil,
-	}
-
-	for _, cmd := range s.Commands {
-		if err := cmd.Execute(&ctx, &uow); err != nil {
-			return uow, err
-		}
-	}
-
-	return uow, nil
-}
-
-type UnitOfWork struct {
-	Readonly   bool
-	Statements []Statement
-}
-
-type Statement struct {
-	Query  string
-	Params map[string]interface{}
-}
-
-type CommandContext struct {
-	Stderr io.Writer
-	Vars   map[string]interface{}
-	Rand   *rand.Rand
-}
-
-type Command interface {
-	Execute(ctx *CommandContext, uow *UnitOfWork) error
-}
-
-type QueryCommand struct {
-	Query string
-}
-
-func (c QueryCommand) Execute(ctx *CommandContext, uow *UnitOfWork) error {
-	params := make(map[string]interface{})
-	for k, v := range ctx.Vars {
-		params[k] = v
-	}
-	uow.Statements = append(uow.Statements, Statement{
-		Query:  c.Query,
-		Params: params,
-	})
-	return nil
-}
-
-type SetCommand struct {
-	VarName    string
-	Expression Expression
-}
-
-func (c SetCommand) Execute(ctx *CommandContext, uow *UnitOfWork) error {
-	value, err := c.Expression.Eval(ctx)
-	if err != nil {
-		return err
-	}
-	ctx.Vars[c.VarName] = value
-	return nil
-}
-
-type SleepCommand struct {
-	Duration Expression
-	Unit     time.Duration
-}
-
-func (c SleepCommand) Execute(ctx *CommandContext, uow *UnitOfWork) error {
-	sleepNumber, err := c.Duration.Eval(ctx)
-	if err != nil {
-		return err
-	}
-	sleepInt, ok := sleepNumber.(int64)
-	if !ok {
-		return fmt.Errorf("\\sleep must be given an integer expression, got %v", sleepNumber)
-	}
-	time.Sleep(time.Duration(sleepInt) * c.Unit)
-	return nil
-}
-
-func Parse(filename, script string, vars map[string]interface{}, seed int64) (Workload, error) {
+func Parse(filename, script string, weight uint) (Script, error) {
 	var s scanner.Scanner
 	s.Init(strings.NewReader(script))
 	s.Filename = filename
@@ -159,14 +36,13 @@ func Parse(filename, script string, vars map[string]interface{}, seed int64) (Wo
 	}
 
 	if c.err != nil {
-		return Workload{}, c.err
+		return Script{}, c.err
 	}
 
-	return Workload{
-		Readonly:  false, // TODO
-		Variables: vars,
-		Commands:  commands,
-		Rand:      rand.New(rand.NewSource(seed)),
+	return Script{
+		Readonly: false, // TODO
+		Commands: commands,
+		Weight:   weight,
 	}, nil
 }
 
@@ -399,7 +275,7 @@ type Expression struct {
 	Payload interface{}
 }
 
-func (e Expression) Eval(ctx *CommandContext) (interface{}, error) {
+func (e Expression) Eval(ctx *ScriptContext) (interface{}, error) {
 	switch e.Kind {
 	case intExpr, floatExpr:
 		return e.Payload, nil
@@ -444,7 +320,7 @@ func (f CallExpr) String() string {
 	return fmt.Sprintf("%s(%s)", f.name, strings.Join(args, ", "))
 }
 
-func (f CallExpr) argAsNumber(i int, ctx *CommandContext) (Number, error) {
+func (f CallExpr) argAsNumber(i int, ctx *ScriptContext) (Number, error) {
 	if len(f.args) <= i {
 		return Number{}, fmt.Errorf("expected at least %d arguments, got %d", i+1, len(f.args))
 	}
@@ -463,7 +339,7 @@ func (f CallExpr) argAsNumber(i int, ctx *CommandContext) (Number, error) {
 	}
 }
 
-func (f CallExpr) Eval(ctx *CommandContext) (interface{}, error) {
+func (f CallExpr) Eval(ctx *ScriptContext) (interface{}, error) {
 	switch f.name {
 	case "abs":
 		a, err := f.argAsNumber(0, ctx)
