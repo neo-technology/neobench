@@ -167,7 +167,7 @@ func describeScenario() string {
 	out.WriteString(fmt.Sprintf(" -d %d", fDuration))
 	out.WriteString(fmt.Sprintf(" -e %s", fEncryptionMode))
 	if fLatencyMode {
-		out.WriteString(fmt.Sprintf("-l -r %f", fRate))
+		out.WriteString(fmt.Sprintf(" -l -r %.3f", fRate))
 	}
 	if fInitMode {
 		out.WriteString(" -i")
@@ -235,21 +235,29 @@ func collectResults(scenario string, out neobench.Output, concurrency int, resul
 		Workers:            results,
 	}
 	// Process results into one histogram and check for errors
-	var combinedHistogram *hdrhistogram.Histogram
+	scriptResults := make(map[string]*neobench.ScriptResult)
 	for _, res := range results {
 		if res.Error != nil {
 			out.Errorf("Worker failed: %v", res.Error)
 			continue
 		}
-		if combinedHistogram == nil {
-			// Copy the first one, we merge the others into this
-			combinedHistogram = hdrhistogram.Import(res.Latencies.Export())
-		} else {
-			combinedHistogram.Merge(res.Latencies)
+		for _, workerScriptResult := range res.Scripts {
+			combinedScriptResult := scriptResults[workerScriptResult.ScriptName]
+			if combinedScriptResult == nil {
+				scriptResults[workerScriptResult.ScriptName] = &neobench.ScriptResult{
+					ScriptName: workerScriptResult.ScriptName,
+					Latencies:  hdrhistogram.Import(workerScriptResult.Latencies.Export()),
+					Rate:       workerScriptResult.Rate,
+					Succeeded:  workerScriptResult.Succeeded,
+					Failed:     workerScriptResult.Failed,
+				}
+			} else {
+				combinedScriptResult.Rate += workerScriptResult.Rate
+				combinedScriptResult.Succeeded += workerScriptResult.Succeeded
+				combinedScriptResult.Failed += workerScriptResult.Failed
+				combinedScriptResult.Latencies.Merge(workerScriptResult.Latencies)
+			}
 		}
-		total.TotalRate += res.Rate
-		total.TotalSucceeded += res.Succeeded
-		total.TotalFailed += res.Failed
 		for name, group := range res.FailedByErrorGroup {
 			existing, found := total.FailedByErrorGroup[name]
 			if found {
@@ -263,11 +271,13 @@ func collectResults(scenario string, out neobench.Output, concurrency int, resul
 		}
 	}
 
-	if combinedHistogram == nil {
+	if len(scriptResults) == 0 {
 		return neobench.Result{}, fmt.Errorf("all workers failed")
 	}
 
-	total.TotalLatencies = combinedHistogram
+	for _, res := range scriptResults {
+		total.Scripts = append(total.Scripts, *res)
+	}
 
 	return total, nil
 }

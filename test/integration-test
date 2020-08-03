@@ -22,10 +22,13 @@ stacktrace() {
 : "${NEOBENCH_PATH:?Please set NEOBENCH_PATH to the neobench binary you want to test}"
 
 SCRIPTPATH="$( cd "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+TEMP="${SCRIPTPATH}/../tmp/test"
 
 main() {
+  mkdir -p "${TEMP}"
   test_tpcb_like
   test_custom_script
+  test_mixed_scripts
 }
 
 test_tpcb_like() {
@@ -38,8 +41,22 @@ test_tpcb_like() {
 test_custom_script() {
   setup_db
 
-  "${NEOBENCH_PATH}" -p secret -w "${SCRIPTPATH}/test.script" -d 5 --define myvar=12
-  "${NEOBENCH_PATH}" -p secret -w "${SCRIPTPATH}/test.script" -d 5 --define myvar=12 --latency
+  "${NEOBENCH_PATH}" -p secret -w "${SCRIPTPATH}/write.script" -d 5 --define myvar=12
+  "${NEOBENCH_PATH}" -p secret -w "${SCRIPTPATH}/write.script" -d 5 --define myvar=12 --latency
+}
+
+test_mixed_scripts() {
+  setup_db
+  local out="${TEMP}/mixed.out"
+  "${NEOBENCH_PATH}" -p secret -w "${SCRIPTPATH}/read.script@10" -w "${SCRIPTPATH}/write.script@1" -d 5 --define myvar=12 --latency | tee "${out}"
+  if ! grep -q "read.script" "${out}"; then
+    echo >&2 "Expected read.script in output above"
+    exit 1
+  fi
+  if ! grep -q "write.script" "${out}"; then
+    echo >&2 "Expected write.script in output above"
+    exit 1
+  fi
 }
 
 setup_db() {

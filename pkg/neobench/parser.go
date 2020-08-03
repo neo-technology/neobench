@@ -40,6 +40,7 @@ func Parse(filename, script string, weight uint) (Script, error) {
 	}
 
 	return Script{
+		Name:     filename,
 		Readonly: false, // TODO
 		Commands: commands,
 		Weight:   weight,

@@ -46,9 +46,9 @@ func NewScripts(scripts ...Script) Scripts {
 
 func (s *Scripts) Choose(r *rand.Rand) Script {
 	// Common case: There is just one script
-	if len(s.Scripts) == 1 {
-		return s.Scripts[0]
-	}
+	// We explicitly still go through the full adventure below in this case, so that someone
+	// testing a very fast workload doesn't get skewed numbers from single workload being faster
+	// to generate than the same workload + some side-script.
 
 	// How do you take the uniformly random number we get from rand, and convert it into a weighted choice of
 	// a script to use?
@@ -56,23 +56,23 @@ func (s *Scripts) Choose(r *rand.Rand) Script {
 	// Imagine that we create a segmented number line, each segment representing one script. The length of each
 	// segment is the weight of that script. So for three scripts, A@2, B@3, C@3, we create a line like:
 	//
-	//   0 1 2 3 4 5 6 7 8 9
-	//   [AA][BBBBBB][CCCCCC]
+	//   0 1 2 3 4 5 6 7 8
+	//   [AA][BBBB][CCCC]
 	//
-	// Then we pick a number between 0 and the max of the number line (10 in the example). Say we get 4:
+	// Then we pick a number between 0 and the max of the number line (eg. 8 since 2+3+3 is 8). Say we get 4:
 	//
-	//   0 1 2 3 4 5 6 7 8 9
-	//   [AA][BBBBBB][CCCCCC]
+	//   0 1 2 3 4 5 6 7 8
+	//   [AA][BBBB][CCCC]
 	//           ^
 	//
 	// The problem with this is that while it's easy visually to see which "item" we landed on, it's not obvious
 	// how to do it quickly on a computer. The solution used here is to maintain a lookup table with the cumulative
 	// weight at each segment, one entry per segment:
 	//
-	//   0 1 2 3 4 5 6 7 8 9
-	//   [AA][BBBBBB][CCCCCC]
-	//    +2     +3     +3    <-- weight of each segment
-	//    2      5      8     <-- lookup table value (eg. cumulation of weights)
+	//   0 1 2 3 4 5 6 7 8
+	//   [AA][BBBB][CCCC]
+	//    +2   +3    +3    <-- weight of each segment
+	//    2     5     8    <-- lookup table value (eg. cumulation of weights, summing left-to-right)
 	//
 	// We can then do binary search into the lookup table, the index we get back is the segment our number fell on.
 
@@ -86,6 +86,7 @@ func (s *Scripts) Choose(r *rand.Rand) Script {
 }
 
 type Script struct {
+	Name     string
 	Readonly bool
 	Weight   uint
 	Commands []Command
@@ -100,6 +101,7 @@ type ScriptContext struct {
 // Evaluate this script in the given context
 func (s *Script) Eval(ctx ScriptContext) (UnitOfWork, error) {
 	uow := UnitOfWork{
+		ScriptName: s.Name,
 		Readonly:   s.Readonly,
 		Statements: nil,
 	}
@@ -146,6 +148,7 @@ func (s *ClientWorkload) Next() (UnitOfWork, error) {
 }
 
 type UnitOfWork struct {
+	ScriptName string
 	Readonly   bool
 	Statements []Statement
 }

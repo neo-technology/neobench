@@ -26,23 +26,18 @@ func (w *Worker) RunBenchmark(wrk ClientWorkload, transactionRate time.Duration,
 	}
 	defer session.Close()
 
-	hdr := hdrhistogram.New(0, 60*60*1000000, 5)
 	workStartTime := w.now()
 	nextStart := workStartTime
-	succeededCounter := int64(0)
-	failedCounter := int64(0)
 	failureGroups := make(map[string]FailureGroup)
+
+	scriptStats := make(map[string]*ScriptResult)
 
 	for {
 		select {
 		case <-stopCh:
-			rate := float64(succeededCounter) / w.now().Sub(workStartTime).Seconds()
 			return WorkerResult{
 				WorkerId:           w.workerId,
-				Rate:               rate,
-				Latencies:          hdr,
-				Succeeded:          succeededCounter,
-				Failed:             failedCounter,
+				Scripts:            w.gatherResults(scriptStats, workStartTime),
 				FailedByErrorGroup: failureGroups,
 			}
 		default:
@@ -52,10 +47,39 @@ func (w *Worker) RunBenchmark(wrk ClientWorkload, transactionRate time.Duration,
 		if err != nil {
 			return WorkerResult{WorkerId: w.workerId, Error: err}
 		}
+		stats, found := scriptStats[uow.ScriptName]
+		if !found {
+			stats = &ScriptResult{
+				ScriptName: uow.ScriptName,
+				Latencies:  hdrhistogram.New(0, 60*60*1000000, 5),
+			}
+			scriptStats[uow.ScriptName] = stats
+		}
 
 		outcome := w.runUnit(session, uow)
 
 		uowLatency := w.now().Sub(nextStart)
+
+		if outcome.succeeded {
+			stats.Succeeded++
+			if err = stats.Latencies.RecordValue(uowLatency.Microseconds()); err != nil {
+				return WorkerResult{WorkerId: w.workerId, Error: err}
+			}
+		} else {
+			stats.Failed++
+			failedGroup, found := failureGroups[outcome.failureGroup]
+			if !found {
+				failureGroups[outcome.failureGroup] = FailureGroup{
+					Count:        1,
+					FirstFailure: outcome.err,
+				}
+			} else {
+				failureGroups[outcome.failureGroup] = FailureGroup{
+					Count:        failedGroup.Count + 1,
+					FirstFailure: failedGroup.FirstFailure,
+				}
+			}
+		}
 
 		if transactionRate > 0 {
 			// Note something critical here: We don't add the actual time the unit took,
@@ -71,6 +95,7 @@ func (w *Worker) RunBenchmark(wrk ClientWorkload, transactionRate time.Duration,
 			if uowLatency < transactionRate {
 				time.Sleep(transactionRate - uowLatency)
 			}
+			nextStart = nextStart.Add(transactionRate)
 		} else {
 			// No rate limit set, so just track when each transaction started; this effectively
 			// makes us coordinate with the database such that our workload rate exactly matches
@@ -78,28 +103,21 @@ func (w *Worker) RunBenchmark(wrk ClientWorkload, transactionRate time.Duration,
 			// latencies useless
 			nextStart = time.Now()
 		}
-
-		if outcome.succeeded {
-			succeededCounter++
-			if err = hdr.RecordValue(uowLatency.Microseconds()); err != nil {
-				return WorkerResult{WorkerId: w.workerId, Error: err}
-			}
-		} else {
-			failedCounter++
-			failedGroup, found := failureGroups[outcome.failureGroup]
-			if !found {
-				failureGroups[outcome.failureGroup] = FailureGroup{
-					Count:        1,
-					FirstFailure: outcome.err,
-				}
-			} else {
-				failureGroups[outcome.failureGroup] = FailureGroup{
-					Count:        failedGroup.Count + 1,
-					FirstFailure: failedGroup.FirstFailure,
-				}
-			}
-		}
 	}
+}
+
+func (w *Worker) gatherResults(workloadStats map[string]*ScriptResult, workStartTime time.Time) []ScriptResult {
+	workloadResults := make([]ScriptResult, 0, len(workloadStats))
+	for _, result := range workloadStats {
+		workloadResults = append(workloadResults, ScriptResult{
+			ScriptName: result.ScriptName,
+			Rate:       float64(result.Succeeded) / w.now().Sub(workStartTime).Seconds(),
+			Failed:     result.Failed,
+			Succeeded:  result.Succeeded,
+			Latencies:  result.Latencies,
+		})
+	}
+	return workloadResults
 }
 
 func (w *Worker) runUnit(session neo4j.Session, uow UnitOfWork) uowOutcome {
@@ -135,14 +153,9 @@ type WorkerResult struct {
 	// if this is set, the rest of this struct will be 0-ed
 	Error error
 
-	// Successful units of work per second
-	Rate float64
-	// Latencies for successful results
-	Latencies *hdrhistogram.Histogram
-	// Total successful units of work
-	Succeeded int64
-	// Total failed units of work
-	Failed int64
+	// Statistics grouped by scripts this worker ran
+	Scripts []ScriptResult
+
 	// Failure counts by cause
 	FailedByErrorGroup map[string]FailureGroup
 }
