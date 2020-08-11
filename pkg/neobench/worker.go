@@ -19,8 +19,11 @@ type Worker struct {
 // rather than from when it actually started.
 //
 // If transactionRate is 0, we go as fast as we can, this is used to measure throughput
-func (w *Worker) RunBenchmark(wrk ClientWorkload, transactionRate time.Duration, stopCh <-chan struct{}) WorkerResult {
-	session, err := w.driver.Session(neo4j.AccessModeWrite)
+func (w *Worker) RunBenchmark(wrk ClientWorkload, databaseName string, transactionRate time.Duration, stopCh <-chan struct{}) WorkerResult {
+	session, err := w.driver.NewSession(neo4j.SessionConfig{
+		AccessMode:   neo4j.AccessModeWrite,
+		DatabaseName: databaseName,
+	})
 	if err != nil {
 		return WorkerResult{WorkerId: w.workerId, Error: err}
 	}
@@ -121,7 +124,7 @@ func (w *Worker) gatherResults(workloadStats map[string]*ScriptResult, workStart
 }
 
 func (w *Worker) runUnit(session neo4j.Session, uow UnitOfWork) uowOutcome {
-	_, err := session.WriteTransaction(func(tx neo4j.Transaction) (interface{}, error) {
+	transaction := func(tx neo4j.Transaction) (interface{}, error) {
 		for _, s := range uow.Statements {
 			res, err := tx.Run(s.Query, s.Params)
 			if err != nil {
@@ -133,7 +136,14 @@ func (w *Worker) runUnit(session neo4j.Session, uow UnitOfWork) uowOutcome {
 			}
 		}
 		return nil, nil
-	})
+	}
+
+	var err error
+	if uow.Readonly {
+		_, err = session.ReadTransaction(transaction)
+	} else {
+		_, err = session.WriteTransaction(transaction)
+	}
 
 	if err != nil {
 		return uowOutcome{

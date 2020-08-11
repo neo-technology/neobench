@@ -49,17 +49,12 @@ func init() {
 
 func main() {
 	pflag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), `neobench - scriptable benchmarks for Neo4j
-
-  neobench runs a canned or user-defined workload against a Neo4j Database.
-  By default, it measures the maximum throughput it can achieve, but it can also
-  measure latencies.
-
-  There is one built-in workload, used by default: builtin:tpcb-like, it is very 
-  similar to the tpcb-like workload found in pgbench.
+		fmt.Fprintf(flag.CommandLine.Output(), `neobench is a benchmarking tool for Neo4j.
 
 Usage:
+  neobench [OPTION]... [DBNAME]
 
+Options:
 `)
 		pflag.PrintDefaults()
 	}
@@ -84,6 +79,11 @@ Usage:
 		encryptionMode = neobench.EncryptionOff
 	default:
 		log.Fatalf("Invalid encryption mode '%s', needs to be one of 'auto', 'true' or 'false'", fEncryptionMode)
+	}
+
+	dbName := ""
+	if pflag.NArg() > 0 {
+		dbName = pflag.Arg(0)
 	}
 
 	driver, err := neobench.NewDriver(fAddress, fUser, fPassword, encryptionMode)
@@ -139,7 +139,7 @@ Usage:
 	}
 
 	if fLatencyMode {
-		result, err := runBenchmark(driver, scenario, out, wrk, runtime, fLatencyMode, fClients, fRate)
+		result, err := runBenchmark(driver, dbName, scenario, out, wrk, runtime, fLatencyMode, fClients, fRate)
 		if err != nil {
 			out.Errorf(err.Error())
 			os.Exit(1)
@@ -147,7 +147,7 @@ Usage:
 		out.ReportLatency(result)
 		os.Exit(0)
 	} else {
-		result, err := runBenchmark(driver, scenario, out, wrk, runtime, fLatencyMode, fClients, fRate)
+		result, err := runBenchmark(driver, dbName, scenario, out, wrk, runtime, fLatencyMode, fClients, fRate)
 		if err != nil {
 			out.Errorf(err.Error())
 			os.Exit(1)
@@ -175,8 +175,8 @@ func describeScenario() string {
 	return out.String()
 }
 
-func runBenchmark(driver neo4j.Driver, scenario string, out neobench.Output, wrk neobench.Workload, runtime time.Duration,
-	latencyMode bool, numClients int, rate float64) (neobench.Result, error) {
+func runBenchmark(driver neo4j.Driver, databaseName, scenario string, out neobench.Output, wrk neobench.Workload,
+	runtime time.Duration, latencyMode bool, numClients int, rate float64) (neobench.Result, error) {
 	stopCh, stop := neobench.SetupSignalHandler()
 	defer stop()
 
@@ -195,7 +195,7 @@ func runBenchmark(driver neo4j.Driver, scenario string, out neobench.Output, wrk
 		clientWork := wrk.NewClient()
 		go func() {
 			defer wg.Done()
-			result := worker.RunBenchmark(clientWork, ratePerWorkerDuration, stopCh)
+			result := worker.RunBenchmark(clientWork, databaseName, ratePerWorkerDuration, stopCh)
 			resultChan <- result
 			if result.Error != nil {
 				out.Errorf("worker %d crashed: %s", workerId, result.Error)

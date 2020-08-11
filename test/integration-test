@@ -29,6 +29,7 @@ main() {
   test_tpcb_like
   test_custom_script
   test_mixed_scripts
+  test_named_database
 }
 
 test_tpcb_like() {
@@ -36,6 +37,27 @@ test_tpcb_like() {
 
   "${NEOBENCH_PATH}" -i -p secret -w builtin:tpcb-like -d 5
   "${NEOBENCH_PATH}" -i -p secret -w builtin:tpcb-like -d 5 --latency
+}
+
+test_named_database() {
+  setup_db
+
+  local out="${TEMP}/named.out"
+  cypher-shell -u neo4j -p secret -d system "CREATE DATABASE neobenchdb;"
+
+  "${NEOBENCH_PATH}" -p secret -d 5 neobenchdb | tee "${out}"
+
+  local workload succeeded
+  workload="$(tail -n 1 "${out}" | cut -d',' -f1)"
+  succeeded="$(tail -n 1 "${out}" | cut -d',' -f2)"
+  if [[ "${workload}" != '"builtin:tpcp-like"' ]]; then
+    echo >&2 "Expected workload to be builtin:tpcp-like, got ${workload}"
+    exit 1
+  fi
+  if [[ "${succeeded}" == "0"* ]]; then
+    echo >&2 "Expected at least some successful queries, got ${succeeded}"
+    exit 1
+  fi
 }
 
 test_custom_script() {
@@ -48,7 +70,9 @@ test_custom_script() {
 test_mixed_scripts() {
   setup_db
   local out="${TEMP}/mixed.out"
-  "${NEOBENCH_PATH}" -p secret -w "${SCRIPTPATH}/read.script@10" -w "${SCRIPTPATH}/write.script@1" -d 5 --define myvar=12 --latency | tee "${out}"
+
+  "${NEOBENCH_PATH}" -p secret -w "${SCRIPTPATH}/read.script@10" -w "${SCRIPTPATH}/write.script@1" -d 20 --define myvar=12 --latency | tee "${out}"
+
   if ! grep -q "read.script" "${out}"; then
     echo >&2 "Expected read.script in output above"
     exit 1
@@ -69,7 +93,7 @@ setup_db() {
   docker run --user "$(id -u):$(id -g)" \
     --name "${NEOBENCH_CONTAINER_NAME:-neobench-it}" \
     --detach --rm \
-    -e "NEO4J_ACCEPT_LICENSE_AGREEMENT=true" \
+    -e "NEO4J_ACCEPT_LICENSE_AGREEMENT=yes" \
     -e "NEO4J_AUTH=neo4j/secret" \
     -p 7474:7474 -p 7687:7687 \
     "${NEO4J_IMAGE}"
