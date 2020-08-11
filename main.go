@@ -59,6 +59,10 @@ Options:
 		pflag.PrintDefaults()
 	}
 	pflag.Parse()
+	if len(os.Args) == 1 {
+		pflag.Usage()
+		os.Exit(1)
+	}
 
 	seed := time.Now().Unix()
 	runtime := time.Duration(fDuration) * time.Second
@@ -145,7 +149,11 @@ Options:
 			os.Exit(1)
 		}
 		out.ReportLatency(result)
-		os.Exit(0)
+		if result.TotalFailed() == 0 {
+			os.Exit(0)
+		} else {
+			os.Exit(1)
+		}
 	} else {
 		result, err := runBenchmark(driver, dbName, scenario, out, wrk, runtime, fLatencyMode, fClients, fRate)
 		if err != nil {
@@ -153,7 +161,11 @@ Options:
 			os.Exit(1)
 		}
 		out.ReportThroughput(result)
-		os.Exit(0)
+		if result.TotalFailed() == 0 {
+			os.Exit(0)
+		} else {
+			os.Exit(1)
+		}
 	}
 }
 

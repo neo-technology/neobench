@@ -23,7 +23,7 @@ Alternatively you can build from source by checking out this repo and running `m
 
     # Run the "TPCB-like" workload for 60 seconds against the default url, bolt://localhost:7687
     # in throughput testing mode and with one single worker / session
-    $ neobench
+    $ neobench -d 60
     
     # Same as above, except measure latency instead of throughput and with concurrent load
     $ neobench --latency --clients 4
@@ -38,6 +38,10 @@ Alternatively you can build from source by checking out this repo and running `m
 # Usage
 
 ```
+Usage:
+  neobench [OPTION]... [DBNAME]
+
+Options:
   -a, --address string          address to connect to, eg. neo4j://mydb:7687 (default "neo4j://localhost:7687")
   -c, --clients int             number of concurrent clients / sessions (default 1)
   -D, --define stringToString   defines variables for workload scripts and query parameters (default [])
@@ -50,8 +54,13 @@ Alternatively you can build from source by checking out this repo and running `m
   -r, --rate float              in latency mode (see -l) this sets transactions per second, total across all clients (default 1)
   -s, --scale scale             sets the scale variable, impact depends on workload (default 1)
   -u, --user string             username (default "neo4j")
-  -w, --workload string         workload to run, either a builtin: one or a path to a workload script (default "builtin:tpcb-like")
+  -w, --workload strings        workload to run, either a builtin: one or a path to a workload script (default [builtin:tpcb-like])
 ```
+
+# Exit codes
+
+Exit code is 2 for invalid usage.
+Exit code is 1 for failure during run. 
 
 # Custom scripts
 

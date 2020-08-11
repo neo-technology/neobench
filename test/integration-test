@@ -26,10 +26,11 @@ TEMP="${SCRIPTPATH}/../tmp/test"
 
 main() {
   mkdir -p "${TEMP}"
-  test_tpcb_like
-  test_custom_script
-  test_mixed_scripts
-  test_named_database
+#  test_tpcb_like
+#  test_custom_script
+#  test_mixed_scripts
+#  test_named_database
+  test_error_exit_codes
 }
 
 test_tpcb_like() {
@@ -79,6 +80,24 @@ test_mixed_scripts() {
   fi
   if ! grep -q "write.script" "${out}"; then
     echo >&2 "Expected write.script in output above"
+    exit 1
+  fi
+}
+
+test_error_exit_codes() {
+  local exitcode
+  local out="${TEMP}/exit.out"
+
+  "${NEOBENCH_PATH}" -p wontwork -d 1 > "${out}" 2>&1 || exitcode="$?"
+  if [[ "${exitcode}" != "1" ]]; then
+    echo >&2 "Expected command to exit with code 1 if given invalid credentials, got ${exitcode}"
+    exit 1
+  fi
+
+
+  "${NEOBENCH_PATH}" --no-such-flag > "${out}" 2>&1 || exitcode="$?"
+  if [[ "${exitcode}" != "2" ]]; then
+    echo >&2 "Expected command to exit with code 2 if given invalid flags, got ${exitcode}"
     exit 1
   fi
 }
