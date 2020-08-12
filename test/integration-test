@@ -26,11 +26,11 @@ TEMP="${SCRIPTPATH}/../tmp/test"
 
 main() {
   mkdir -p "${TEMP}"
-#  test_tpcb_like
-#  test_custom_script
-#  test_mixed_scripts
-#  test_named_database
   test_error_exit_codes
+  test_tpcb_like
+  test_custom_script
+  test_mixed_scripts
+  test_named_database
 }
 
 test_tpcb_like() {
@@ -98,6 +98,13 @@ test_error_exit_codes() {
   "${NEOBENCH_PATH}" --no-such-flag > "${out}" 2>&1 || exitcode="$?"
   if [[ "${exitcode}" != "2" ]]; then
     echo >&2 "Expected command to exit with code 2 if given invalid flags, got ${exitcode}"
+    exit 1
+  fi
+
+  # Note the very long timeout as a hacky way to make sure we exit immediately rather than fail after
+  "${NEOBENCH_PATH}" -p wontwork -w "${SCRIPTPATH}/syntaxerror.script" -d 10000000 > "${out}" 2>&1 || exitcode="$?"
+  if [[ "${exitcode}" != "1" ]]; then
+    echo >&2 "Expected command to exit with code 1 if given syntax error, got ${exitcode}"
     exit 1
   fi
 }

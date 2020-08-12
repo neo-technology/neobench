@@ -122,7 +122,7 @@ Options:
 			}
 			path = parts[0]
 		}
-		script, err := createScript(path, uint(weight))
+		script, err := createScript(driver, variables, path, uint(weight))
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -303,7 +303,7 @@ func initWorkload(paths []string, scale int64, driver neo4j.Driver, out neobench
 	return nil
 }
 
-func createScript(path string, weight uint) (neobench.Script, error) {
+func createScript(driver neo4j.Driver, vars map[string]interface{}, path string, weight uint) (neobench.Script, error) {
 	if path == "builtin:tpcb-like" {
 		return neobench.Parse("builtin:tpcp-like", neobench.TPCBLike, weight)
 	}
@@ -313,7 +313,14 @@ func createScript(path string, weight uint) (neobench.Script, error) {
 		return neobench.Script{}, fmt.Errorf("failed to read workload file at %s: %s", path, err)
 	}
 
-	return neobench.Parse(path, string(scriptContent), weight)
+	script, err := neobench.Parse(path, string(scriptContent), weight)
+	if err != nil {
+		return neobench.Script{}, err
+	}
+
+	readonly, err := neobench.WorkloadPreflight(driver, script, vars)
+	script.Readonly = readonly
+	return script, err
 }
 
 func awaitCompletion(stopCh chan struct{}, deadline time.Time, out neobench.Output) {

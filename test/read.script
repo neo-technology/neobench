@@ -1,0 +1,3 @@
+\set myparam random(1, 10 * $scale) + $myvar
+
+MATCH (n) RETURN id(n) LIMIT 1;

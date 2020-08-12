@@ -2,6 +2,8 @@ package neobench
 
 import (
 	"fmt"
+	"github.com/neo4j/neo4j-go-driver/neo4j"
+	"github.com/pkg/errors"
 	"io"
 	"math/rand"
 	"os"
@@ -208,4 +210,42 @@ func (c SleepCommand) Execute(ctx *ScriptContext, uow *UnitOfWork) error {
 	}
 	time.Sleep(time.Duration(sleepInt) * c.Unit)
 	return nil
+}
+
+// Validates that a workload doesn't have syntax errors etc, and tells us if it is read-only
+func WorkloadPreflight(driver neo4j.Driver, script Script, vars map[string]interface{}) (readonly bool, err error) {
+	session, err := driver.Session(neo4j.AccessModeWrite)
+	if err != nil {
+		return false, err
+	}
+	r := rand.New(rand.NewSource(1337))
+	unitOfWork, err := script.Eval(ScriptContext{
+		Stderr: os.Stderr,
+		Vars:   vars,
+		Rand:   r,
+	})
+	if err != nil {
+		return false, err
+	}
+	readonlyRaw, err := session.ReadTransaction(func(tx neo4j.Transaction) (interface{}, error) {
+		readonly := true
+		for _, stmt := range unitOfWork.Statements {
+			res, err := tx.Run(fmt.Sprintf("EXPLAIN %s", stmt.Query), stmt.Params)
+			if err != nil {
+				return false, err
+			}
+			summary, err := res.Consume()
+			if err != nil {
+				return false, err
+			}
+			readonly = summary.StatementType() == neo4j.StatementTypeReadOnly && readonly
+		}
+
+		return readonly, nil
+	})
+	if err != nil {
+		return false, errors.Wrapf(err, "script '%s' failed preflight checks", script.Name)
+	}
+	readonly = readonlyRaw.(bool)
+	return
 }

@@ -1,0 +1,1 @@
+SELECT * FROM users LEFT OUTER JOIN how_does_this_work_again;
