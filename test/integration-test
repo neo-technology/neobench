@@ -38,6 +38,7 @@ test_tpcb_like() {
 
   "${NEOBENCH_PATH}" -i -p secret -w builtin:tpcb-like -d 5
   "${NEOBENCH_PATH}" -i -p secret -w builtin:tpcb-like -d 5 --latency
+  "${NEOBENCH_PATH}" -i -p secret -w builtin:match-only -d 5
 }
 
 test_named_database() {

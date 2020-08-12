@@ -299,6 +299,9 @@ func initWorkload(paths []string, scale int64, driver neo4j.Driver, out neobench
 		if path == "builtin:tpcb-like" {
 			return neobench.InitTPCBLike(scale, driver, out)
 		}
+		if path == "builtin:match-only" {
+			return neobench.InitTPCBLike(scale, driver, out)
+		}
 	}
 	return nil
 }
@@ -306,6 +309,10 @@ func initWorkload(paths []string, scale int64, driver neo4j.Driver, out neobench
 func createScript(driver neo4j.Driver, vars map[string]interface{}, path string, weight uint) (neobench.Script, error) {
 	if path == "builtin:tpcb-like" {
 		return neobench.Parse("builtin:tpcp-like", neobench.TPCBLike, weight)
+	}
+
+	if path == "builtin:match-only" {
+		return neobench.Parse("builtin:match-only", neobench.MatchOnly, weight)
 	}
 
 	scriptContent, err := ioutil.ReadFile(path)

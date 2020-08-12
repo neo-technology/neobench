@@ -19,6 +19,11 @@ MATCH (branch:Branch {bid: $bid}) SET branch.balance = branch.balance + $delta;
 CREATE (:History { tid: $tid, bid: $bid, aid: $aid, delta: $delta, mtime: timestamp() });
 `
 
+const MatchOnly = `
+\set aid random(1, 100000 * $scale)
+MATCH (account:Account {aid:$aid}) RETURN account.balance;
+`
+
 func InitTPCBLike(scale int64, driver neo4j.Driver, out Output) error {
 	numBranches := 1 * scale
 	numTellers := 10 * scale
