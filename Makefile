@@ -23,7 +23,7 @@ ifeq ($(NEOBENCH_VERSION),)
   NEOBENCH_VERSION := dev
 endif
 
-build: tmp/.integration-tests-pass
+build: tmp/.integration-tests-pass out/docker_image_id
 .PHONY: build
 
 tmp/.binaries-built: out/neobench_$(NEOBENCH_VERSION)_linux_amd64 \
@@ -67,6 +67,13 @@ tmp/.gofmt: $(shell find . -name '*.go')
 >   exit 1
 > fi
 > touch $@
+
+out/docker_image_id: tmp/.binaries-built
+> mkdir --parents $(@D)
+> dockerlog="tmp/dockerlog"
+> docker build --build-arg NEOBENCH_VERSION=$(NEOBENCH_VERSION) --tag "jjdh:$(NEOBENCH_VERSION)" . | tee "$${dockerlog}"
+> image_id="$$(grep "Successfully built" "$${dockerlog}" | cut -d' ' -f3)"
+> echo "$${image_id}" > $@
 
 tmp/.integration-tests-pass: tmp/.binaries-built test/integration-test
 > mkdir --parents $(@D)

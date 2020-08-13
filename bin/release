@@ -10,10 +10,10 @@ main() {
   git tag -l
 
   echo -n "Type next version: "
-  read newVersion
+  read version
 
 
-  echo -n "Release [${newVersion}]? [yN]"
+  echo -n "Release [${version}]? [yN]"
   read choice
 
   if [[ "${choice}" != "y" ]]; then
@@ -21,13 +21,18 @@ main() {
   fi
 
   echo "Making sure binaries are built.."
-  NEOBENCH_VERSION="${newVersion}" make
+  NEOBENCH_VERSION="${version}" make
 
-  echo "Tagging and pushing"
-  git tag "${newVersion}"
+  echo "Tagging and pushing to github.."
+  git tag "${version}"
   git push --tags
 
-  echo "Done! You'll need to manually upload the ${newVersion} artifacts to github though"
+  local dockertag="jjdh/neobench:${version}"
+  echo "Pushing '${dockertag}' to dockerhub.."
+  docker tag "$(cat out/docker_image_id)" "${dockertag}"
+  docker push "${dockertag}"
+
+  echo "Done! You'll need to manually upload the ${version} artifacts to github though"
 }
 
 main "$@"
