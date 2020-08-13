@@ -17,11 +17,14 @@ Please do not compare benchmark results from different versions of this tool unt
 
 You can download pre-built binaries from the "assets" section in the latest release [here](https://github.com/jakewins/neobench/releases).
 
+The command is also available in dockerhub, so you can run it directly as a docker workload.
+See `docker run jjdh/neobench -h`, usage is identical to the cli command.
+
 Alternatively you can build from source by checking out this repo and running `make`, or even just `go build .` if you'd rather skip integration tests.
 
 # Minimum examples
 
-    # Run the "TPCB-like" workload for 60 seconds against the default url, bolt://localhost:7687
+    # Run the "TPCB-like" workload for 60 seconds against the default url, neo4j://localhost:7687
     # in throughput testing mode and with one single worker / session
     $ neobench -d 60
     

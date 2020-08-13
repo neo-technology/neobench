@@ -32,6 +32,15 @@ main() {
   docker tag "$(cat out/docker_image_id)" "${dockertag}"
   docker push "${dockertag}"
 
+  echo -n "Also tag [${version}] as 'latest' in dockerhub? [yN]"
+  read choice
+
+  if [[ "${choice}" == "y" ]]; then
+    docker tag "$(cat out/docker_image_id)" "jjdh/neobench:latest"
+    docker push "jjdh/neobench:latest"
+  fi
+
+
   echo "Done! You'll need to manually upload the ${version} artifacts to github though"
 }
 
