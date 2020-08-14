@@ -16,7 +16,9 @@ type ProgressReport struct {
 }
 
 type Result struct {
-	Scenario string
+	// Targeted database
+	DatabaseName string
+	Scenario     string
 
 	FailedByErrorGroup map[string]FailureGroup
 
@@ -53,10 +55,12 @@ func (r *Result) TotalRate() (n float64) {
 // between different scripts will mean totally different things.
 type ScriptResult struct {
 	ScriptName string
-	Rate       float64
-	Failed     int64
-	Succeeded  int64
-	Latencies  *hdrhistogram.Histogram
+	// Rate is scripts executed per second, both succeeded and failed
+	// TODO should this just count succeeded? That creates confusing effects with how the workload paces itself tho..
+	Rate      float64
+	Failed    int64
+	Succeeded int64
+	Latencies *hdrhistogram.Histogram
 }
 
 type Output interface {
@@ -136,7 +140,6 @@ func (o *InteractiveOutput) ReportThroughput(result Result) {
 }
 
 func (o *InteractiveOutput) ReportLatency(result Result) {
-
 	s := strings.Builder{}
 
 	s.WriteString("== Results ==\n")
@@ -165,10 +168,10 @@ func (o *InteractiveOutput) ReportLatency(result Result) {
 	}
 }
 
-func summarizeLatency(result ScriptResult, s *strings.Builder, indent string) {
-	histo := result.Latencies
+func summarizeLatency(script ScriptResult, s *strings.Builder, indent string) {
+	histo := script.Latencies
 	lines := []string{
-		fmt.Sprintf("Successful Transactions: %d (%.3f per second)\n\n", result.Succeeded, result.Rate),
+		fmt.Sprintf("Successful Transactions: %d (%.3f per second)\n\n", script.Succeeded, script.Rate),
 		fmt.Sprintf("Max: %.3fms, Min: %.3fms, Mean: %.3fms, Stddev: %.3f\n\n",
 			float64(histo.Max())/1000.0, float64(histo.Min())/1000.0, histo.Mean()/1000.0, histo.StdDev()/1000.0),
 		fmt.Sprintf("Latency distribution:\n"),
@@ -262,34 +265,51 @@ func (o *CsvOutput) ReportThroughput(result Result) {
 }
 
 func (o *CsvOutput) ReportLatency(result Result) {
-	columns := []string{"script", "succeeded", "failed", "min_ms", "mean_ms", "max_ms", "stdev", "p50_ms", "p75_ms", "p99_ms", "p99999_ms"}
+	fmtFloat := func(v interface{}) string {
+		switch v.(type) {
+		case int64:
+			return fmt.Sprintf("%.3f", float64(v.(int64)))
+		case float64:
+			return fmt.Sprintf("%.3f", v.(float64))
+		}
+		return fmt.Sprintf("%v?", v)
+	}
+	columns := []struct {
+		name  string
+		value func(s ScriptResult) string
+	}{
+		{"db", func(s ScriptResult) string { return fmt.Sprintf("\"%s\",", result.DatabaseName) }},
+		{"script", func(s ScriptResult) string { return fmt.Sprintf("\"%s\",", s.ScriptName) }},
+		{"rate", func(s ScriptResult) string { return fmtFloat(s.Rate) }},
+		{"succeeded", func(s ScriptResult) string { return fmtFloat(s.Latencies.TotalCount()) }},
+		{"failed", func(s ScriptResult) string { return fmtFloat(s.Failed) }},
+		{"mean", func(s ScriptResult) string { return fmtFloat(s.Latencies.Mean() / 1000.0) }},
+		{"stdev", func(s ScriptResult) string { return fmtFloat(s.Latencies.StdDev()) }},
+		{"p0", func(s ScriptResult) string { return fmtFloat(float64(s.Latencies.Min()) / 1000.0) }},
+		{"p25", func(s ScriptResult) string { return fmtFloat(float64(s.Latencies.ValueAtQuantile(25)) / 1000.0) }},
+		{"p50", func(s ScriptResult) string { return fmtFloat(float64(s.Latencies.ValueAtQuantile(50)) / 1000.0) }},
+		{"p75", func(s ScriptResult) string { return fmtFloat(float64(s.Latencies.ValueAtQuantile(75)) / 1000.0) }},
+		{"p99", func(s ScriptResult) string { return fmtFloat(float64(s.Latencies.ValueAtQuantile(99)) / 1000.0) }},
+		{"p99999", func(s ScriptResult) string { return fmtFloat(float64(s.Latencies.ValueAtQuantile(99.999)) / 1000.0) }},
+		{"p100", func(s ScriptResult) string { return fmtFloat(float64(s.Latencies.Max()) / 1000.0) }},
+	}
+
+	columnNames := make([]string, 0, len(columns))
+	for _, col := range columns {
+		columnNames = append(columnNames, col.name)
+	}
 
 	s := strings.Builder{}
 	separator := ","
-	s.WriteString(strings.Join(columns, separator))
+	s.WriteString(strings.Join(columnNames, separator))
 	s.WriteString("\n")
 
 	for _, script := range result.Scripts {
-		histo := script.Latencies
-		row := []float64{
-			float64(histo.TotalCount()),
-			float64(result.TotalFailed()),
-			float64(histo.Min()) / 1000.0,
-			histo.Mean() / 1000.0,
-			float64(histo.Max()) / 1000.0,
-			histo.StdDev() / 1000.0,
-			float64(histo.ValueAtQuantile(50)) / 1000.0,
-			float64(histo.ValueAtQuantile(75)) / 1000.0,
-			float64(histo.ValueAtQuantile(95)) / 1000.0,
-			float64(histo.ValueAtQuantile(99)) / 1000.0,
-			float64(histo.ValueAtQuantile(99.999)) / 1000.0,
-		}
-		s.WriteString(fmt.Sprintf("\"%s\",", script.ScriptName))
-		for i, cell := range row {
-			if i > 0 {
-				s.WriteString(separator)
+		for i, col := range columns {
+			if i != 0 {
+				s.WriteString(",")
 			}
-			s.WriteString(fmt.Sprintf("%.03f", cell))
+			s.WriteString(col.value(script))
 		}
 		s.WriteString("\n")
 	}

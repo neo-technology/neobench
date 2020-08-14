@@ -3,6 +3,7 @@ package neobench
 import (
 	"github.com/codahale/hdrhistogram"
 	"github.com/neo4j/neo4j-go-driver/neo4j"
+	"github.com/pkg/errors"
 	"strings"
 	"time"
 )
@@ -11,6 +12,7 @@ type Worker struct {
 	workerId int64
 	driver   neo4j.Driver
 	now      func() time.Time
+	sleep    func(duration time.Duration)
 }
 
 // transactionRate is Time between transactions; this defines the workload rate
@@ -19,7 +21,9 @@ type Worker struct {
 // rather than from when it actually started.
 //
 // If transactionRate is 0, we go as fast as we can, this is used to measure throughput
-func (w *Worker) RunBenchmark(wrk ClientWorkload, databaseName string, transactionRate time.Duration, stopCh <-chan struct{}) WorkerResult {
+// If numTransactions is 0, we go until stopCh tells us to stop
+func (w *Worker) RunBenchmark(wrk ClientWorkload, databaseName string, transactionRate time.Duration,
+	numTransactions uint64, stopCh <-chan struct{}) WorkerResult {
 	session, err := w.driver.NewSession(neo4j.SessionConfig{
 		AccessMode:   neo4j.AccessModeWrite,
 		DatabaseName: databaseName,
@@ -34,6 +38,7 @@ func (w *Worker) RunBenchmark(wrk ClientWorkload, databaseName string, transacti
 	failureGroups := make(map[string]FailureGroup)
 
 	scriptStats := make(map[string]*ScriptResult)
+	transactionCounter := uint64(0)
 
 	for {
 		select {
@@ -66,7 +71,7 @@ func (w *Worker) RunBenchmark(wrk ClientWorkload, databaseName string, transacti
 		if outcome.succeeded {
 			stats.Succeeded++
 			if err = stats.Latencies.RecordValue(uowLatency.Microseconds()); err != nil {
-				return WorkerResult{WorkerId: w.workerId, Error: err}
+				return WorkerResult{WorkerId: w.workerId, Error: errors.Wrapf(err, "failed to record latency: %s", uowLatency)}
 			}
 		} else {
 			stats.Failed++
@@ -84,6 +89,15 @@ func (w *Worker) RunBenchmark(wrk ClientWorkload, databaseName string, transacti
 			}
 		}
 
+		transactionCounter++
+		if numTransactions != 0 && transactionCounter >= numTransactions {
+			return WorkerResult{
+				WorkerId:           w.workerId,
+				Scripts:            w.gatherResults(scriptStats, workStartTime),
+				FailedByErrorGroup: failureGroups,
+			}
+		}
+
 		if transactionRate > 0 {
 			// Note something critical here: We don't add the actual time the unit took,
 			// we add the *max* time it *should* have taken. This means that if the database
@@ -94,9 +108,9 @@ func (w *Worker) RunBenchmark(wrk ClientWorkload, databaseName string, transacti
 			//
 			// If the database isn't keeping up,
 			// then the latency numbers will grow extremely large, showing the actual wait time
-			// real users would see from when they ask the system to do something to when they get service. nextStart = nextStart.Add(transactionRate)
+			// real users would see from when they ask the system to do something to when they get service.
 			if uowLatency < transactionRate {
-				time.Sleep(transactionRate - uowLatency)
+				w.sleep(transactionRate - uowLatency)
 			}
 			nextStart = nextStart.Add(transactionRate)
 		} else {
@@ -114,7 +128,7 @@ func (w *Worker) gatherResults(workloadStats map[string]*ScriptResult, workStart
 	for _, result := range workloadStats {
 		workloadResults = append(workloadResults, ScriptResult{
 			ScriptName: result.ScriptName,
-			Rate:       float64(result.Succeeded) / w.now().Sub(workStartTime).Seconds(),
+			Rate:       float64(result.Succeeded+result.Failed) / w.now().Sub(workStartTime).Seconds(),
 			Failed:     result.Failed,
 			Succeeded:  result.Succeeded,
 			Latencies:  result.Latencies,
@@ -154,6 +168,13 @@ func (w *Worker) runUnit(session neo4j.Session, uow UnitOfWork) uowOutcome {
 	}
 
 	return uowOutcome{succeeded: true}
+}
+
+// Converts a total target rate into a per-client "pacing" duration, used to slow down workers to match
+// the target rate.
+func TotalRatePerSecondToDurationPerClient(numClients int, rate float64) time.Duration {
+	ratePerWorkerPerSecond := rate / float64(numClients)
+	return time.Duration(1000*1000/ratePerWorkerPerSecond) * time.Microsecond
 }
 
 type WorkerResult struct {

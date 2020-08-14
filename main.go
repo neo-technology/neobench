@@ -194,8 +194,7 @@ func runBenchmark(driver neo4j.Driver, databaseName, scenario string, out neoben
 
 	ratePerWorkerDuration := time.Duration(0)
 	if latencyMode {
-		ratePerWorkerPerSecond := rate / float64(numClients)
-		ratePerWorkerDuration = time.Duration(1000*1000/ratePerWorkerPerSecond) * time.Microsecond
+		ratePerWorkerDuration = neobench.TotalRatePerSecondToDurationPerClient(numClients, rate)
 	}
 
 	resultChan := make(chan neobench.WorkerResult, numClients)
@@ -207,7 +206,7 @@ func runBenchmark(driver neo4j.Driver, databaseName, scenario string, out neoben
 		clientWork := wrk.NewClient()
 		go func() {
 			defer wg.Done()
-			result := worker.RunBenchmark(clientWork, databaseName, ratePerWorkerDuration, stopCh)
+			result := worker.RunBenchmark(clientWork, databaseName, ratePerWorkerDuration, 0, stopCh)
 			resultChan <- result
 			if result.Error != nil {
 				out.Errorf("worker %d crashed: %s", workerId, result.Error)
@@ -231,10 +230,10 @@ func runBenchmark(driver neo4j.Driver, databaseName, scenario string, out neoben
 	})
 	wg.Wait()
 
-	return collectResults(scenario, out, numClients, resultChan)
+	return collectResults(databaseName, scenario, out, numClients, resultChan)
 }
 
-func collectResults(scenario string, out neobench.Output, concurrency int, resultChan chan neobench.WorkerResult) (neobench.Result, error) {
+func collectResults(databaseName, scenario string, out neobench.Output, concurrency int, resultChan chan neobench.WorkerResult) (neobench.Result, error) {
 	// Collect results
 	results := make([]neobench.WorkerResult, 0, concurrency)
 	for i := 0; i < concurrency; i++ {
@@ -242,6 +241,7 @@ func collectResults(scenario string, out neobench.Output, concurrency int, resul
 	}
 
 	total := neobench.Result{
+		DatabaseName:       databaseName,
 		Scenario:           scenario,
 		FailedByErrorGroup: make(map[string]neobench.FailureGroup),
 		Workers:            results,
