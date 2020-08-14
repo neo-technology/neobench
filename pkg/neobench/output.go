@@ -160,7 +160,8 @@ func (o *InteractiveOutput) ReportLatency(result Result) {
 			}
 		}
 	}
-	o.reportErrors(result, &s)
+	s.WriteString("\n")
+	writeErrorReport(result, &s)
 
 	_, err := fmt.Fprint(o.OutStream, s.String())
 	if err != nil {
@@ -175,6 +176,8 @@ func summarizeLatency(script ScriptResult, s *strings.Builder, indent string) {
 		fmt.Sprintf("Max: %.3fms, Min: %.3fms, Mean: %.3fms, Stddev: %.3f\n\n",
 			float64(histo.Max())/1000.0, float64(histo.Min())/1000.0, histo.Mean()/1000.0, histo.StdDev()/1000.0),
 		fmt.Sprintf("Latency distribution:\n"),
+		fmt.Sprintf("  P00.000: %.03fms\n", float64(histo.Min())/1000.0),
+		fmt.Sprintf("  P25.000: %.03fms\n", float64(histo.ValueAtQuantile(25))/1000.0),
 		fmt.Sprintf("  P50.000: %.03fms\n", float64(histo.ValueAtQuantile(50))/1000.0),
 		fmt.Sprintf("  P75.000: %.03fms\n", float64(histo.ValueAtQuantile(75))/1000.0),
 		fmt.Sprintf("  P95.000: %.03fms\n", float64(histo.ValueAtQuantile(95))/1000.0),
@@ -187,8 +190,7 @@ func summarizeLatency(script ScriptResult, s *strings.Builder, indent string) {
 	}
 }
 
-func (o *InteractiveOutput) reportErrors(result Result, s *strings.Builder) {
-	s.WriteString("\n")
+func writeErrorReport(result Result, s *strings.Builder) {
 	s.WriteString(fmt.Sprintf("Error stats:\n"))
 	if result.TotalFailed() == 0 {
 		s.WriteString(fmt.Sprintf("  No errors!\n"))
@@ -257,11 +259,17 @@ func (o *CsvOutput) ReportThroughput(result Result) {
 		s.WriteString("\n")
 	}
 
-	_, err := fmt.Fprint(o.OutStream, s.String())
-	if err != nil {
+	if _, err := fmt.Fprint(o.OutStream, s.String()); err != nil {
 		panic(err)
 	}
 
+	if result.TotalFailed() > 0 {
+		s.Reset()
+		writeErrorReport(result, &s)
+		if _, err := fmt.Fprint(o.ErrStream, s.String()); err != nil {
+			panic(err)
+		}
+	}
 }
 
 func (o *CsvOutput) ReportLatency(result Result) {
@@ -319,6 +327,13 @@ func (o *CsvOutput) ReportLatency(result Result) {
 		panic(err)
 	}
 
+	if result.TotalFailed() > 0 {
+		s.Reset()
+		writeErrorReport(result, &s)
+		if _, err := fmt.Fprint(o.ErrStream, s.String()); err != nil {
+			panic(err)
+		}
+	}
 }
 
 func (o *CsvOutput) Errorf(format string, a ...interface{}) {
