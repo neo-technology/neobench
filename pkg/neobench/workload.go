@@ -213,8 +213,11 @@ func (c SleepCommand) Execute(ctx *ScriptContext, uow *UnitOfWork) error {
 }
 
 // Validates that a workload doesn't have syntax errors etc, and tells us if it is read-only
-func WorkloadPreflight(driver neo4j.Driver, script Script, vars map[string]interface{}) (readonly bool, err error) {
-	session, err := driver.Session(neo4j.AccessModeWrite)
+func WorkloadPreflight(driver neo4j.Driver, dbName string, script Script, vars map[string]interface{}) (readonly bool, err error) {
+	session, err := driver.NewSession(neo4j.SessionConfig{
+		AccessMode:   neo4j.AccessModeWrite,
+		DatabaseName: dbName,
+	})
 	if err != nil {
 		return false, err
 	}
