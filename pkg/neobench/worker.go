@@ -216,5 +216,6 @@ func NewWorker(driver neo4j.Driver) *Worker {
 	return &Worker{
 		driver: driver,
 		now:    time.Now,
+		sleep:  time.Sleep,
 	}
 }

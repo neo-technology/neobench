@@ -131,7 +131,8 @@ func (o *InteractiveOutput) ReportThroughput(result Result) {
 	for _, script := range result.Scripts {
 		s.WriteString(fmt.Sprintf("  [%s]: %.03f successful transactions per second\n", script.ScriptName, script.Rate))
 	}
-	o.reportErrors(result, &s)
+	s.WriteString("\n")
+	writeErrorReport(result, &s)
 
 	_, err := fmt.Fprintf(o.OutStream, s.String())
 	if err != nil {
