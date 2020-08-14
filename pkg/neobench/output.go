@@ -287,8 +287,8 @@ func (o *CsvOutput) ReportLatency(result Result) {
 		name  string
 		value func(s ScriptResult) string
 	}{
-		{"db", func(s ScriptResult) string { return fmt.Sprintf("\"%s\",", result.DatabaseName) }},
-		{"script", func(s ScriptResult) string { return fmt.Sprintf("\"%s\",", s.ScriptName) }},
+		{"db", func(s ScriptResult) string { return fmt.Sprintf("\"%s\"", result.DatabaseName) }},
+		{"script", func(s ScriptResult) string { return fmt.Sprintf("\"%s\"", s.ScriptName) }},
 		{"rate", func(s ScriptResult) string { return fmtFloat(s.Rate) }},
 		{"succeeded", func(s ScriptResult) string { return fmtFloat(s.Latencies.TotalCount()) }},
 		{"failed", func(s ScriptResult) string { return fmtFloat(s.Failed) }},
