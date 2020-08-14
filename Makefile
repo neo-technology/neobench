@@ -71,7 +71,7 @@ tmp/.gofmt: $(shell find . -name '*.go')
 out/docker_image_id: tmp/.binaries-built
 > mkdir --parents $(@D)
 > dockerlog="tmp/dockerlog"
-> docker build --build-arg NEOBENCH_VERSION=$(NEOBENCH_VERSION) --tag "jjdh:$(NEOBENCH_VERSION)" . | tee "$${dockerlog}"
+> docker build --build-arg NEOBENCH_VERSION=$(NEOBENCH_VERSION) --tag "neobench:$(NEOBENCH_VERSION)" . | tee "$${dockerlog}"
 > image_id="$$(grep "Successfully built" "$${dockerlog}" | cut -d' ' -f3)"
 > echo "$${image_id}" > $@
 
