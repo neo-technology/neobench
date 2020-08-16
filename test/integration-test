@@ -73,7 +73,7 @@ test_mixed_scripts() {
   setup_db
   local out="${TEMP}/mixed.out"
 
-  "${NEOBENCH_PATH}" -p secret -w "${SCRIPTPATH}/read.script@10" -w "${SCRIPTPATH}/write.script@1" -d 20 --define myvar=12 --latency | tee "${out}"
+  "${NEOBENCH_PATH}" -p secret -w "${SCRIPTPATH}/read.script@5" -w "${SCRIPTPATH}/write.script@5" -d 20 --define myvar=12 --latency | tee "${out}"
 
   if ! grep -q "read.script" "${out}"; then
     echo >&2 "Expected read.script in output above"
