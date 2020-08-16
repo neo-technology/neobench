@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/codahale/hdrhistogram"
 	"github.com/neo4j/neo4j-go-driver/neo4j"
 	"github.com/spf13/pflag"
 	"io/ioutil"
@@ -27,6 +26,7 @@ var fUser string
 var fPassword string
 var fEncryptionMode string
 var fDuration int
+var fProgress int
 var fVariables map[string]string
 var fWorkloads []string
 var fOutputFormat string
@@ -41,6 +41,7 @@ func init() {
 	pflag.StringVarP(&fPassword, "password", "p", "neo4j", "password")
 	pflag.StringVarP(&fEncryptionMode, "encryption", "e", "auto", "whether to use encryption, `auto`, `true` or `false`")
 	pflag.IntVarP(&fDuration, "duration", "d", 60, "seconds to run")
+	pflag.IntVar(&fProgress, "progress", 10, "interval, in seconds, to report progress")
 	pflag.StringToStringVarP(&fVariables, "define", "D", nil, "defines variables for workload scripts and query parameters")
 	pflag.StringSliceVarP(&fWorkloads, "workload", "w", []string{"builtin:tpcb-like"}, "workload to run, either a builtin: one or a path to a workload script")
 	pflag.BoolVarP(&fLatencyMode, "latency", "l", false, "run in latency testing more rather than throughput mode")
@@ -142,8 +143,10 @@ Options:
 		}
 	}
 
+	progressInterval := time.Duration(fProgress) * time.Second
+
 	if fLatencyMode {
-		result, err := runBenchmark(driver, dbName, scenario, out, wrk, runtime, fLatencyMode, fClients, fRate)
+		result, err := runBenchmark(driver, dbName, scenario, out, wrk, runtime, fLatencyMode, fClients, fRate, progressInterval)
 		if err != nil {
 			out.Errorf(err.Error())
 			os.Exit(1)
@@ -155,7 +158,7 @@ Options:
 			os.Exit(1)
 		}
 	} else {
-		result, err := runBenchmark(driver, dbName, scenario, out, wrk, runtime, fLatencyMode, fClients, fRate)
+		result, err := runBenchmark(driver, dbName, scenario, out, wrk, runtime, fLatencyMode, fClients, fRate, progressInterval)
 		if err != nil {
 			out.Errorf(err.Error())
 			os.Exit(1)
@@ -188,7 +191,7 @@ func describeScenario() string {
 }
 
 func runBenchmark(driver neo4j.Driver, databaseName, scenario string, out neobench.Output, wrk neobench.Workload,
-	runtime time.Duration, latencyMode bool, numClients int, rate float64) (neobench.Result, error) {
+	runtime time.Duration, latencyMode bool, numClients int, rate float64, progressInterval time.Duration) (neobench.Result, error) {
 	stopCh, stop := neobench.SetupSignalHandler()
 	defer stop()
 
@@ -198,15 +201,18 @@ func runBenchmark(driver neo4j.Driver, databaseName, scenario string, out neoben
 	}
 
 	resultChan := make(chan neobench.WorkerResult, numClients)
+	resultRecorders := make([]*neobench.ResultRecorder, 0)
 	var wg sync.WaitGroup
 	for i := 0; i < numClients; i++ {
 		wg.Add(1)
-		worker := neobench.NewWorker(driver)
+		recorder := neobench.NewResultRecorder(int64(i))
+		resultRecorders = append(resultRecorders, recorder)
+		worker := neobench.NewWorker(driver, int64(i))
 		workerId := i
 		clientWork := wrk.NewClient()
 		go func() {
 			defer wg.Done()
-			result := worker.RunBenchmark(clientWork, databaseName, ratePerWorkerDuration, 0, stopCh)
+			result := worker.RunBenchmark(clientWork, databaseName, ratePerWorkerDuration, 0, stopCh, recorder)
 			resultChan <- result
 			if result.Error != nil {
 				out.Errorf("worker %d crashed: %s", workerId, result.Error)
@@ -221,7 +227,7 @@ func runBenchmark(driver neo4j.Driver, databaseName, scenario string, out neoben
 		Completeness: 0,
 	})
 	deadline := time.Now().Add(runtime)
-	awaitCompletion(stopCh, deadline, out)
+	awaitCompletion(stopCh, deadline, out, databaseName, scenario, progressInterval, resultRecorders)
 	stop()
 	out.ReportProgress(neobench.ProgressReport{
 		Section:      "benchmark",
@@ -240,55 +246,14 @@ func collectResults(databaseName, scenario string, out neobench.Output, concurre
 		results = append(results, <-resultChan)
 	}
 
-	total := neobench.Result{
-		DatabaseName:       databaseName,
-		Scenario:           scenario,
-		FailedByErrorGroup: make(map[string]neobench.FailureGroup),
-		Workers:            results,
-	}
+	total := neobench.NewResult(databaseName, scenario)
 	// Process results into one histogram and check for errors
-	scriptResults := make(map[string]*neobench.ScriptResult)
 	for _, res := range results {
 		if res.Error != nil {
 			out.Errorf("Worker failed: %v", res.Error)
 			continue
 		}
-		for _, workerScriptResult := range res.Scripts {
-			combinedScriptResult := scriptResults[workerScriptResult.ScriptName]
-			if combinedScriptResult == nil {
-				scriptResults[workerScriptResult.ScriptName] = &neobench.ScriptResult{
-					ScriptName: workerScriptResult.ScriptName,
-					Latencies:  hdrhistogram.Import(workerScriptResult.Latencies.Export()),
-					Rate:       workerScriptResult.Rate,
-					Succeeded:  workerScriptResult.Succeeded,
-					Failed:     workerScriptResult.Failed,
-				}
-			} else {
-				combinedScriptResult.Rate += workerScriptResult.Rate
-				combinedScriptResult.Succeeded += workerScriptResult.Succeeded
-				combinedScriptResult.Failed += workerScriptResult.Failed
-				combinedScriptResult.Latencies.Merge(workerScriptResult.Latencies)
-			}
-		}
-		for name, group := range res.FailedByErrorGroup {
-			existing, found := total.FailedByErrorGroup[name]
-			if found {
-				total.FailedByErrorGroup[name] = neobench.FailureGroup{
-					Count:        existing.Count + group.Count,
-					FirstFailure: existing.FirstFailure,
-				}
-			} else {
-				total.FailedByErrorGroup[name] = group
-			}
-		}
-	}
-
-	if len(scriptResults) == 0 {
-		return neobench.Result{}, fmt.Errorf("all workers failed")
-	}
-
-	for _, res := range scriptResults {
-		total.Scripts = append(total.Scripts, *res)
+		total.Add(res)
 	}
 
 	return total, nil
@@ -330,7 +295,8 @@ func createScript(driver neo4j.Driver, dbName string, vars map[string]interface{
 	return script, err
 }
 
-func awaitCompletion(stopCh chan struct{}, deadline time.Time, out neobench.Output) {
+func awaitCompletion(stopCh chan struct{}, deadline time.Time, out neobench.Output, databaseName, scenario string, progressInterval time.Duration, recorders []*neobench.ResultRecorder) {
+	nextProgressReport := time.Now().Add(progressInterval)
 	originalDelta := deadline.Sub(time.Now()).Seconds()
 	for {
 		select {
@@ -345,11 +311,17 @@ func awaitCompletion(stopCh chan struct{}, deadline time.Time, out neobench.Outp
 			time.Sleep(delta)
 			break
 		}
-		out.ReportProgress(neobench.ProgressReport{
-			Section:      "benchmark",
-			Step:         "run",
-			Completeness: 1 - delta.Seconds()/originalDelta,
-		})
+
+		if now.Before(nextProgressReport) {
+			nextProgressReport = nextProgressReport.Add(progressInterval)
+			checkpoint := neobench.NewResult(databaseName, scenario)
+			for _, r := range recorders {
+				checkpoint.Add(r.ProgressReport(time.Now()))
+			}
+
+			completeness := 1 - delta.Seconds()/originalDelta
+			out.ReportWorkloadProgress(completeness, checkpoint)
+		}
 		time.Sleep(time.Millisecond * 100)
 	}
 }

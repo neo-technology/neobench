@@ -5,6 +5,7 @@ import (
 	"github.com/neo4j/neo4j-go-driver/neo4j"
 	"github.com/pkg/errors"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -23,7 +24,7 @@ type Worker struct {
 // If transactionRate is 0, we go as fast as we can, this is used to measure throughput
 // If numTransactions is 0, we go until stopCh tells us to stop
 func (w *Worker) RunBenchmark(wrk ClientWorkload, databaseName string, transactionRate time.Duration,
-	numTransactions uint64, stopCh <-chan struct{}) WorkerResult {
+	numTransactions uint64, stopCh <-chan struct{}, recorder *ResultRecorder) WorkerResult {
 	session, err := w.driver.NewSession(neo4j.SessionConfig{
 		AccessMode:   neo4j.AccessModeWrite,
 		DatabaseName: databaseName,
@@ -34,20 +35,16 @@ func (w *Worker) RunBenchmark(wrk ClientWorkload, databaseName string, transacti
 	defer session.Close()
 
 	workStartTime := w.now()
-	nextStart := workStartTime
-	failureGroups := make(map[string]FailureGroup)
+	recorder.totalStart = workStartTime
 
-	scriptStats := make(map[string]*ScriptResult)
+	nextStart := workStartTime
+
 	transactionCounter := uint64(0)
 
 	for {
 		select {
 		case <-stopCh:
-			return WorkerResult{
-				WorkerId:           w.workerId,
-				Scripts:            w.gatherResults(scriptStats, workStartTime),
-				FailedByErrorGroup: failureGroups,
-			}
+			return recorder.Complete(w.now())
 		default:
 		}
 
@@ -55,47 +52,18 @@ func (w *Worker) RunBenchmark(wrk ClientWorkload, databaseName string, transacti
 		if err != nil {
 			return WorkerResult{WorkerId: w.workerId, Error: err}
 		}
-		stats, found := scriptStats[uow.ScriptName]
-		if !found {
-			stats = &ScriptResult{
-				ScriptName: uow.ScriptName,
-				Latencies:  hdrhistogram.New(0, 60*60*1000000, 5),
-			}
-			scriptStats[uow.ScriptName] = stats
-		}
 
 		outcome := w.runUnit(session, uow)
 
 		uowLatency := w.now().Sub(nextStart)
 
-		if outcome.succeeded {
-			stats.Succeeded++
-			if err = stats.Latencies.RecordValue(uowLatency.Microseconds()); err != nil {
-				return WorkerResult{WorkerId: w.workerId, Error: errors.Wrapf(err, "failed to record latency: %s", uowLatency)}
-			}
-		} else {
-			stats.Failed++
-			failedGroup, found := failureGroups[outcome.failureGroup]
-			if !found {
-				failureGroups[outcome.failureGroup] = FailureGroup{
-					Count:        1,
-					FirstFailure: outcome.err,
-				}
-			} else {
-				failureGroups[outcome.failureGroup] = FailureGroup{
-					Count:        failedGroup.Count + 1,
-					FirstFailure: failedGroup.FirstFailure,
-				}
-			}
+		if err = recorder.record(uow.ScriptName, uowLatency, outcome); err != nil {
+			return WorkerResult{WorkerId: w.workerId, Error: err}
 		}
 
 		transactionCounter++
 		if numTransactions != 0 && transactionCounter >= numTransactions {
-			return WorkerResult{
-				WorkerId:           w.workerId,
-				Scripts:            w.gatherResults(scriptStats, workStartTime),
-				FailedByErrorGroup: failureGroups,
-			}
+			return recorder.Complete(w.now())
 		}
 
 		if transactionRate > 0 {
@@ -177,6 +145,78 @@ func TotalRatePerSecondToDurationPerClient(numClients int, rate float64) time.Du
 	return time.Duration(1000*1000/ratePerWorkerPerSecond) * time.Microsecond
 }
 
+// Concurrent data structure; used by the worker to record progress, accessible from other threads
+// to read progress checkpoints.
+type ResultRecorder struct {
+	mut sync.Mutex
+
+	// Stats since last progress report, read and reset by calling ProgressReport
+	current      WorkerResult
+	currentStart time.Time
+
+	// Total since the workload started
+	total      WorkerResult
+	totalStart time.Time
+}
+
+func NewResultRecorder(workerId int64) *ResultRecorder {
+	return &ResultRecorder{
+		current: NewWorkerResult(workerId),
+		total:   NewWorkerResult(workerId),
+	}
+}
+
+func (t *ResultRecorder) record(scriptName string, latency time.Duration, outcome uowOutcome) error {
+	t.mut.Lock()
+	defer t.mut.Unlock()
+
+	if err := t.current.record(scriptName, latency, outcome); err != nil {
+		return err
+	}
+	return t.total.record(scriptName, latency, outcome)
+}
+
+// Reports progress since last time you called this function
+func (t *ResultRecorder) ProgressReport(now time.Time) WorkerResult {
+	t.mut.Lock()
+	defer t.mut.Unlock()
+
+	out := t.current
+
+	delta := now.Sub(t.currentStart)
+	out.calculateRate(delta)
+
+	t.current = NewWorkerResult(out.WorkerId)
+	t.currentStart = now
+
+	return out
+}
+
+func (t *ResultRecorder) Complete(now time.Time) WorkerResult {
+	t.mut.Lock()
+	defer t.mut.Unlock()
+
+	out := t.total
+
+	delta := now.Sub(t.totalStart)
+	out.calculateRate(delta)
+
+	// Not needed at the time of writing this, but since we're returning pointers
+	// (the maps etc inside t.total), clear this structures references before we exit the mutex
+	t.total = NewWorkerResult(out.WorkerId)
+	t.totalStart = now
+
+	return out
+}
+
+func NewWorkerResult(workerId int64) WorkerResult {
+	return WorkerResult{
+		WorkerId:           workerId,
+		Scripts:            make(map[string]*ScriptResult),
+		FailedByErrorGroup: make(map[string]FailureGroup),
+	}
+}
+
 type WorkerResult struct {
 	// Unique identifier for this worker
 	WorkerId int64
@@ -185,10 +225,64 @@ type WorkerResult struct {
 	Error error
 
 	// Statistics grouped by scripts this worker ran
-	Scripts []ScriptResult
+	Scripts map[string]*ScriptResult
 
 	// Failure counts by cause
 	FailedByErrorGroup map[string]FailureGroup
+}
+
+func (r *WorkerResult) getOrCreateScriptResult(scriptName string) *ScriptResult {
+	stats, found := r.Scripts[scriptName]
+	if found {
+		return stats
+	}
+	stats = &ScriptResult{
+		ScriptName: scriptName,
+		Latencies:  hdrhistogram.New(0, 60*60*1000000, 5),
+	}
+	r.Scripts[scriptName] = stats
+	return stats
+}
+
+func (r *WorkerResult) record(scriptName string, latency time.Duration, outcome uowOutcome) error {
+	stats, found := r.Scripts[scriptName]
+	if !found {
+		stats = &ScriptResult{
+			ScriptName: scriptName,
+			Latencies:  hdrhistogram.New(0, 60*60*1000000, 5),
+		}
+		r.Scripts[scriptName] = stats
+	}
+
+	if outcome.succeeded {
+		stats.Succeeded++
+		if err := stats.Latencies.RecordValue(latency.Microseconds()); err != nil {
+			return errors.Wrapf(err, "failed to record latency: %s", latency)
+		}
+	} else {
+		stats.Failed++
+		failedGroup, found := r.FailedByErrorGroup[outcome.failureGroup]
+		if !found {
+			r.FailedByErrorGroup[outcome.failureGroup] = FailureGroup{
+				Count:        1,
+				FirstFailure: outcome.err,
+			}
+		} else {
+			r.FailedByErrorGroup[outcome.failureGroup] = FailureGroup{
+				Count:        failedGroup.Count + 1,
+				FirstFailure: failedGroup.FirstFailure,
+			}
+		}
+	}
+	return nil
+}
+
+// Calculates the throughput rate for each script in this result, given the delta time it took the
+// workload to run.
+func (r *WorkerResult) calculateRate(delta time.Duration) {
+	for _, script := range r.Scripts {
+		script.Rate = (float64(script.Succeeded+script.Failed) / float64(delta.Microseconds())) * 1000 * 1000
+	}
 }
 
 // Combines the count with the last error we saw, to help users see what the errors were
@@ -212,10 +306,11 @@ type uowOutcome struct {
 	err          error
 }
 
-func NewWorker(driver neo4j.Driver) *Worker {
+func NewWorker(driver neo4j.Driver, workerId int64) *Worker {
 	return &Worker{
-		driver: driver,
-		now:    time.Now,
-		sleep:  time.Sleep,
+		workerId: workerId,
+		driver:   driver,
+		now:      time.Now,
+		sleep:    time.Sleep,
 	}
 }

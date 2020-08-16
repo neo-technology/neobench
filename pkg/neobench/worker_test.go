@@ -28,14 +28,15 @@ func TestMaintainsRateInFaceOfFailure(t *testing.T) {
 		now:      clock.now,
 		sleep:    clock.sleep,
 	}
+	rec := NewResultRecorder(0)
 
 	targetRatePerSecond := float64(1)
 	txDuration := TotalRatePerSecondToDurationPerClient(1, targetRatePerSecond)
 
-	result := w.RunBenchmark(newTestWorkload(r), "", txDuration, 100, stopCh)
+	result := w.RunBenchmark(newTestWorkload(r), "", txDuration, 100, stopCh, rec)
 
 	assert.NoError(t, result.Error)
-	sr := result.Scripts[0]
+	sr := result.Scripts["workertest"]
 	assert.InDelta(t, targetRatePerSecond, sr.Rate, 0.1)
 }
 
