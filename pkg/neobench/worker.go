@@ -250,7 +250,7 @@ func (r *WorkerResult) record(scriptName string, latency time.Duration, outcome 
 	if !found {
 		stats = &ScriptResult{
 			ScriptName: scriptName,
-			Latencies:  hdrhistogram.New(0, 60*60*1000000, 5),
+			Latencies:  hdrhistogram.New(0, 60*60*1000000, 3),
 		}
 		r.Scripts[scriptName] = stats
 	}
