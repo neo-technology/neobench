@@ -73,6 +73,10 @@ type fakeDriver struct {
 	maxLatency  time.Duration
 }
 
+func (d *fakeDriver) VerifyConnectivity() error {
+	panic("implement me")
+}
+
 func (d *fakeDriver) Target() url.URL {
 	panic("implement me")
 }
