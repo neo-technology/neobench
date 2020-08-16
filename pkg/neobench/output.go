@@ -101,6 +101,7 @@ type ScriptResult struct {
 }
 
 type Output interface {
+	BenchmarkStart()
 	ReportProgress(report ProgressReport)
 	ReportWorkloadProgress(completeness float64, checkpoint Result)
 	ReportThroughput(result Result)
@@ -144,6 +145,9 @@ type InteractiveOutput struct {
 	// Used to rate-limit progress reporting
 	LastProgressReport ProgressReport
 	LastProgressTime   time.Time
+}
+
+func (o *InteractiveOutput) BenchmarkStart() {
 }
 
 func (o *InteractiveOutput) ReportWorkloadProgress(completeness float64, checkpoint Result) {
@@ -262,12 +266,15 @@ type CsvOutput struct {
 	LastProgressTime   time.Time
 }
 
-func (o *CsvOutput) ReportWorkloadProgress(completeness float64, checkpoint Result) {
-	_, err := fmt.Fprintf(o.ErrStream, "[workload] %.02f%% done\n", completeness*100)
+func (o *CsvOutput) BenchmarkStart() {
+	columnNames := make([]string, 0, len(csvColumns))
+	for _, col := range csvColumns {
+		columnNames = append(columnNames, col.name)
+	}
+	_, err := fmt.Fprintf(o.OutStream, "%s\n", strings.Join(columnNames, ","))
 	if err != nil {
 		panic(err)
 	}
-	o.ReportLatency(checkpoint)
 }
 
 func (o *CsvOutput) ReportProgress(report ProgressReport) {
@@ -281,6 +288,14 @@ func (o *CsvOutput) ReportProgress(report ProgressReport) {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func (o *CsvOutput) ReportWorkloadProgress(completeness float64, checkpoint Result) {
+	_, err := fmt.Fprintf(o.ErrStream, "[workload] %.02f%% done\n", completeness*100)
+	if err != nil {
+		panic(err)
+	}
+	o.ReportLatency(checkpoint)
 }
 
 func (o *CsvOutput) ReportThroughput(result Result) {
@@ -321,51 +336,18 @@ func (o *CsvOutput) ReportThroughput(result Result) {
 }
 
 func (o *CsvOutput) ReportLatency(result Result) {
-	fmtFloat := func(v interface{}) string {
-		switch v.(type) {
-		case int64:
-			return fmt.Sprintf("%.3f", float64(v.(int64)))
-		case float64:
-			return fmt.Sprintf("%.3f", v.(float64))
-		}
-		return fmt.Sprintf("%v?", v)
-	}
-	columns := []struct {
-		name  string
-		value func(s *ScriptResult) string
-	}{
-		{"db", func(s *ScriptResult) string { return fmt.Sprintf("\"%s\"", result.DatabaseName) }},
-		{"script", func(s *ScriptResult) string { return fmt.Sprintf("\"%s\"", s.ScriptName) }},
-		{"rate", func(s *ScriptResult) string { return fmtFloat(s.Rate) }},
-		{"succeeded", func(s *ScriptResult) string { return fmtFloat(s.Latencies.TotalCount()) }},
-		{"failed", func(s *ScriptResult) string { return fmtFloat(s.Failed) }},
-		{"mean", func(s *ScriptResult) string { return fmtFloat(s.Latencies.Mean() / 1000.0) }},
-		{"stdev", func(s *ScriptResult) string { return fmtFloat(s.Latencies.StdDev()) }},
-		{"p0", func(s *ScriptResult) string { return fmtFloat(float64(s.Latencies.Min()) / 1000.0) }},
-		{"p25", func(s *ScriptResult) string { return fmtFloat(float64(s.Latencies.ValueAtQuantile(25)) / 1000.0) }},
-		{"p50", func(s *ScriptResult) string { return fmtFloat(float64(s.Latencies.ValueAtQuantile(50)) / 1000.0) }},
-		{"p75", func(s *ScriptResult) string { return fmtFloat(float64(s.Latencies.ValueAtQuantile(75)) / 1000.0) }},
-		{"p99", func(s *ScriptResult) string { return fmtFloat(float64(s.Latencies.ValueAtQuantile(99)) / 1000.0) }},
-		{"p99999", func(s *ScriptResult) string { return fmtFloat(float64(s.Latencies.ValueAtQuantile(99.999)) / 1000.0) }},
-		{"p100", func(s *ScriptResult) string { return fmtFloat(float64(s.Latencies.Max()) / 1000.0) }},
-	}
+	o.writeLatencyRow(result)
+}
 
-	columnNames := make([]string, 0, len(columns))
-	for _, col := range columns {
-		columnNames = append(columnNames, col.name)
-	}
-
+func (o *CsvOutput) writeLatencyRow(result Result) {
 	s := strings.Builder{}
-	separator := ","
-	s.WriteString(strings.Join(columnNames, separator))
-	s.WriteString("\n")
 
 	for _, script := range result.Scripts {
-		for i, col := range columns {
+		for i, col := range csvColumns {
 			if i != 0 {
 				s.WriteString(",")
 			}
-			s.WriteString(col.value(script))
+			s.WriteString(col.value(result, script))
 		}
 		s.WriteString("\n")
 	}
@@ -382,6 +364,46 @@ func (o *CsvOutput) ReportLatency(result Result) {
 			panic(err)
 		}
 	}
+}
+
+func fmtFloat(v interface{}) string {
+	switch v.(type) {
+	case int64:
+		return fmt.Sprintf("%.3f", float64(v.(int64)))
+	case float64:
+		return fmt.Sprintf("%.3f", v.(float64))
+	}
+	return fmt.Sprintf("%v?", v)
+}
+
+var csvColumns = []struct {
+	name  string
+	value func(r Result, s *ScriptResult) string
+}{
+	{"db", func(r Result, s *ScriptResult) string { return fmt.Sprintf("\"%s\"", r.DatabaseName) }},
+	{"script", func(r Result, s *ScriptResult) string { return fmt.Sprintf("\"%s\"", s.ScriptName) }},
+	{"rate", func(r Result, s *ScriptResult) string { return fmtFloat(s.Rate) }},
+	{"succeeded", func(r Result, s *ScriptResult) string { return fmtFloat(s.Latencies.TotalCount()) }},
+	{"failed", func(r Result, s *ScriptResult) string { return fmtFloat(s.Failed) }},
+	{"mean", func(r Result, s *ScriptResult) string { return fmtFloat(s.Latencies.Mean() / 1000.0) }},
+	{"stdev", func(r Result, s *ScriptResult) string { return fmtFloat(s.Latencies.StdDev()) }},
+	{"p0", func(r Result, s *ScriptResult) string { return fmtFloat(float64(s.Latencies.Min()) / 1000.0) }},
+	{"p25", func(r Result, s *ScriptResult) string {
+		return fmtFloat(float64(s.Latencies.ValueAtQuantile(25)) / 1000.0)
+	}},
+	{"p50", func(r Result, s *ScriptResult) string {
+		return fmtFloat(float64(s.Latencies.ValueAtQuantile(50)) / 1000.0)
+	}},
+	{"p75", func(r Result, s *ScriptResult) string {
+		return fmtFloat(float64(s.Latencies.ValueAtQuantile(75)) / 1000.0)
+	}},
+	{"p99", func(r Result, s *ScriptResult) string {
+		return fmtFloat(float64(s.Latencies.ValueAtQuantile(99)) / 1000.0)
+	}},
+	{"p99999", func(r Result, s *ScriptResult) string {
+		return fmtFloat(float64(s.Latencies.ValueAtQuantile(99.999)) / 1000.0)
+	}},
+	{"p100", func(r Result, s *ScriptResult) string { return fmtFloat(float64(s.Latencies.Max()) / 1000.0) }},
 }
 
 func (o *CsvOutput) Errorf(format string, a ...interface{}) {

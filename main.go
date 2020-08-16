@@ -200,6 +200,8 @@ func runBenchmark(driver neo4j.Driver, databaseName, scenario string, out neoben
 		ratePerWorkerDuration = neobench.TotalRatePerSecondToDurationPerClient(numClients, rate)
 	}
 
+	out.BenchmarkStart()
+
 	resultChan := make(chan neobench.WorkerResult, numClients)
 	resultRecorders := make([]*neobench.ResultRecorder, 0)
 	var wg sync.WaitGroup
@@ -221,19 +223,9 @@ func runBenchmark(driver neo4j.Driver, databaseName, scenario string, out neoben
 		}()
 	}
 
-	out.ReportProgress(neobench.ProgressReport{
-		Section:      "benchmark",
-		Step:         "run",
-		Completeness: 0,
-	})
 	deadline := time.Now().Add(runtime)
 	awaitCompletion(stopCh, deadline, out, databaseName, scenario, progressInterval, resultRecorders)
 	stop()
-	out.ReportProgress(neobench.ProgressReport{
-		Section:      "benchmark",
-		Step:         "stopping",
-		Completeness: 0,
-	})
 	wg.Wait()
 
 	return collectResults(databaseName, scenario, out, numClients, resultChan)
@@ -312,7 +304,7 @@ func awaitCompletion(stopCh chan struct{}, deadline time.Time, out neobench.Outp
 			break
 		}
 
-		if now.Before(nextProgressReport) {
+		if now.After(nextProgressReport) {
 			nextProgressReport = nextProgressReport.Add(progressInterval)
 			checkpoint := neobench.NewResult(databaseName, scenario)
 			for _, r := range recorders {

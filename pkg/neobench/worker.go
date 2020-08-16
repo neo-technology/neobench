@@ -36,6 +36,7 @@ func (w *Worker) RunBenchmark(wrk ClientWorkload, databaseName string, transacti
 
 	workStartTime := w.now()
 	recorder.totalStart = workStartTime
+	recorder.currentStart = workStartTime
 
 	nextStart := workStartTime
 
