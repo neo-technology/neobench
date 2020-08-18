@@ -146,7 +146,7 @@ Options:
 	progressInterval := time.Duration(fProgress) * time.Second
 
 	if fLatencyMode {
-		result, err := runBenchmark(driver, dbName, scenario, out, wrk, runtime, fLatencyMode, fClients, fRate, progressInterval)
+		result, err := runBenchmark(driver, fAddress, dbName, scenario, out, wrk, runtime, fLatencyMode, fClients, fRate, progressInterval)
 		if err != nil {
 			out.Errorf(err.Error())
 			os.Exit(1)
@@ -158,7 +158,7 @@ Options:
 			os.Exit(1)
 		}
 	} else {
-		result, err := runBenchmark(driver, dbName, scenario, out, wrk, runtime, fLatencyMode, fClients, fRate, progressInterval)
+		result, err := runBenchmark(driver, fAddress, dbName, scenario, out, wrk, runtime, fLatencyMode, fClients, fRate, progressInterval)
 		if err != nil {
 			out.Errorf(err.Error())
 			os.Exit(1)
@@ -190,7 +190,7 @@ func describeScenario() string {
 	return out.String()
 }
 
-func runBenchmark(driver neo4j.Driver, databaseName, scenario string, out neobench.Output, wrk neobench.Workload,
+func runBenchmark(driver neo4j.Driver, url, databaseName, scenario string, out neobench.Output, wrk neobench.Workload,
 	runtime time.Duration, latencyMode bool, numClients int, rate float64, progressInterval time.Duration) (neobench.Result, error) {
 	stopCh, stop := neobench.SetupSignalHandler()
 	defer stop()
@@ -200,7 +200,7 @@ func runBenchmark(driver neo4j.Driver, databaseName, scenario string, out neoben
 		ratePerWorkerDuration = neobench.TotalRatePerSecondToDurationPerClient(numClients, rate)
 	}
 
-	out.BenchmarkStart()
+	out.BenchmarkStart(databaseName, url)
 
 	resultChan := make(chan neobench.WorkerResult, numClients)
 	resultRecorders := make([]*neobench.ResultRecorder, 0)

@@ -101,7 +101,7 @@ type ScriptResult struct {
 }
 
 type Output interface {
-	BenchmarkStart()
+	BenchmarkStart(databaseName, url string)
 	ReportProgress(report ProgressReport)
 	ReportWorkloadProgress(completeness float64, checkpoint Result)
 	ReportThroughput(result Result)
@@ -147,7 +147,14 @@ type InteractiveOutput struct {
 	LastProgressTime   time.Time
 }
 
-func (o *InteractiveOutput) BenchmarkStart() {
+func (o *InteractiveOutput) BenchmarkStart(databaseName, address string) {
+	if databaseName == "" {
+		databaseName = "<default>"
+	}
+	_, err := fmt.Fprintf(o.ErrStream, "Starting workload on database %s against %s\n", databaseName, address)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (o *InteractiveOutput) ReportWorkloadProgress(completeness float64, checkpoint Result) {
@@ -266,12 +273,20 @@ type CsvOutput struct {
 	LastProgressTime   time.Time
 }
 
-func (o *CsvOutput) BenchmarkStart() {
+func (o *CsvOutput) BenchmarkStart(databaseName, address string) {
+	if databaseName == "" {
+		databaseName = "<default>"
+	}
+	_, err := fmt.Fprintf(o.ErrStream, "Starting workload on database %s against %s\n", databaseName, address)
+	if err != nil {
+		panic(err)
+	}
+
 	columnNames := make([]string, 0, len(csvColumns))
 	for _, col := range csvColumns {
 		columnNames = append(columnNames, col.name)
 	}
-	_, err := fmt.Fprintf(o.OutStream, "%s\n", strings.Join(columnNames, ","))
+	_, err = fmt.Fprintf(o.OutStream, "%s\n", strings.Join(columnNames, ","))
 	if err != nil {
 		panic(err)
 	}
