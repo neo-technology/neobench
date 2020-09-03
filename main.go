@@ -137,7 +137,7 @@ Options:
 	}
 
 	if fInitMode {
-		err = initWorkload(fWorkloads, fScale, driver, out)
+		err = initWorkload(fWorkloads, dbName, fScale, driver, out)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -251,13 +251,13 @@ func collectResults(databaseName, scenario string, out neobench.Output, concurre
 	return total, nil
 }
 
-func initWorkload(paths []string, scale int64, driver neo4j.Driver, out neobench.Output) error {
+func initWorkload(paths []string, dbName string,scale int64, driver neo4j.Driver, out neobench.Output) error {
 	for _, path := range paths {
 		if path == "builtin:tpcb-like" {
-			return neobench.InitTPCBLike(scale, driver, out)
+			return neobench.InitTPCBLike(scale, dbName, driver, out)
 		}
 		if path == "builtin:match-only" {
-			return neobench.InitTPCBLike(scale, driver, out)
+			return neobench.InitTPCBLike(scale, dbName, driver, out)
 		}
 	}
 	return nil

@@ -24,11 +24,14 @@ const MatchOnly = `
 MATCH (account:Account {aid:$aid}) RETURN account.balance;
 `
 
-func InitTPCBLike(scale int64, driver neo4j.Driver, out Output) error {
+func InitTPCBLike(scale int64, dbName string, driver neo4j.Driver, out Output) error {
 	numBranches := 1 * scale
 	numTellers := 10 * scale
 	numAccounts := 100000 * scale
-	session, err := driver.Session(neo4j.AccessModeWrite)
+	session, err := driver.NewSession(neo4j.SessionConfig{
+		AccessMode: neo4j.AccessModeWrite,
+		DatabaseName: dbName,
+	})
 	if err != nil {
 		return err
 	}
