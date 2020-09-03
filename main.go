@@ -251,7 +251,7 @@ func collectResults(databaseName, scenario string, out neobench.Output, concurre
 	return total, nil
 }
 
-func initWorkload(paths []string, dbName string,scale int64, driver neo4j.Driver, out neobench.Output) error {
+func initWorkload(paths []string, dbName string, scale int64, driver neo4j.Driver, out neobench.Output) error {
 	for _, path := range paths {
 		if path == "builtin:tpcb-like" {
 			return neobench.InitTPCBLike(scale, dbName, driver, out)

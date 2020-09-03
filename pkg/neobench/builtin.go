@@ -29,7 +29,7 @@ func InitTPCBLike(scale int64, dbName string, driver neo4j.Driver, out Output) e
 	numTellers := 10 * scale
 	numAccounts := 100000 * scale
 	session, err := driver.NewSession(neo4j.SessionConfig{
-		AccessMode: neo4j.AccessModeWrite,
+		AccessMode:   neo4j.AccessModeWrite,
 		DatabaseName: dbName,
 	})
 	if err != nil {
