@@ -26,32 +26,40 @@ type Scripts struct {
 	Scripts []Script
 	// Lookup table for choice of scripts; one entry for each script, each entry records the cumulative
 	// weight of that script and all scripts before it in the array. See Choose() for details
-	WeightedLookup []int
-	// Sum of all weights in []Script
-	TotalWeight int
+	WeightedLookup *WeightedRandom
 }
 
 func NewScripts(scripts ...Script) Scripts {
-	lookupTable := make([]int, len(scripts))
-	cumulativeWeight := 0
-	for i, script := range scripts {
-		cumulativeWeight += int(script.Weight)
-		lookupTable[i] = cumulativeWeight
+	wr := &WeightedRandom{}
+	for _, script := range scripts {
+		wr.Add(script, int(script.Weight))
 	}
 
 	return Scripts{
 		Scripts:        scripts,
-		WeightedLookup: lookupTable,
-		TotalWeight:    cumulativeWeight,
+		WeightedLookup: wr,
 	}
 }
 
 func (s *Scripts) Choose(r *rand.Rand) Script {
-	// Common case: There is just one script
-	// We explicitly still go through the full adventure below in this case, so that someone
-	// testing a very fast workload doesn't get skewed numbers from single workload being faster
-	// to generate than the same workload + some side-script.
+	return s.WeightedLookup.Draw(r).(Script)
+}
 
+// List of items that can be randomly drawn from; each item has a weight determining its probability to be drawn
+type WeightedRandom struct {
+	// See draw(..)
+	lookupTable []int
+	totalWeight int
+	entries     []interface{}
+}
+
+func (w *WeightedRandom) Add(entry interface{}, weight int) {
+	w.lookupTable = append(w.lookupTable, w.totalWeight+weight)
+	w.entries = append(w.entries, entry)
+	w.totalWeight += weight
+}
+
+func (w *WeightedRandom) Draw(r *rand.Rand) interface{} {
 	// How do you take the uniformly random number we get from rand, and convert it into a weighted choice of
 	// a script to use?
 	//
@@ -79,12 +87,12 @@ func (s *Scripts) Choose(r *rand.Rand) Script {
 	// We can then do binary search into the lookup table, the index we get back is the segment our number fell on.
 
 	// 1: Pick a random number between 1 and the combined weight of all scripts
-	point := r.Intn(s.TotalWeight) + 1
+	point := r.Intn(w.totalWeight) + 1
 
 	// 2: Use binary search in the weighted lookup table to find the closest index for this weight
-	index := sort.SearchInts(s.WeightedLookup, point)
+	index := sort.SearchInts(w.lookupTable, point)
 
-	return s.Scripts[index]
+	return w.entries[index]
 }
 
 type Script struct {

@@ -1,7 +1,8 @@
-package neobench
+package builtin
 
 import (
 	"github.com/neo4j/neo4j-go-driver/neo4j"
+	"neobench/pkg/neobench"
 )
 
 const TPCBLike = `
@@ -24,7 +25,7 @@ const MatchOnly = `
 MATCH (account:Account {aid:$aid}) RETURN account.balance;
 `
 
-func InitTPCBLike(scale int64, dbName string, driver neo4j.Driver, out Output) error {
+func InitTPCBLike(scale int64, dbName string, driver neo4j.Driver, out neobench.Output) error {
 	numBranches := 1 * scale
 	numTellers := 10 * scale
 	numAccounts := 100000 * scale
@@ -37,25 +38,27 @@ func InitTPCBLike(scale int64, dbName string, driver neo4j.Driver, out Output) e
 	}
 	defer session.Close()
 
-	out.ReportProgress(ProgressReport{
+	out.ReportProgress(neobench.ProgressReport{
 		Section:      "init",
 		Step:         "create schema",
 		Completeness: 0,
 	})
-	_, err = session.Run(`CREATE CONSTRAINT ON (b:Branch) ASSERT b.bid IS UNIQUE
-CREATE CONSTRAINT ON (t:Teller) ASSERT t.tid IS UNIQUE
-CREATE CONSTRAINT ON (a:Account) ASSERT a.aid IS UNIQUE
-`, map[string]interface{}{})
+
+	err = ensureSchema(session, []schemaEntry{
+		{Label: "Branch", Property: "bid", Unique: true},
+		{Label: "Teller", Property: "tid", Unique: true},
+		{Label: "Account", Property: "aid", Unique: true},
+	})
 	if err != nil {
 		return err
 	}
 
-	out.ReportProgress(ProgressReport{
+	out.ReportProgress(neobench.ProgressReport{
 		Section:      "init",
 		Step:         "create branches & tellers",
 		Completeness: 0,
 	})
-	_, err = session.Run(`UNWIND range(1, $nBranches) AS branchId 
+	err = runQ(session, `UNWIND range(1, $nBranches) AS branchId 
 MERGE (:Branch {bid: branchId, balance: 0})
 `, map[string]interface{}{
 		"nBranches": numBranches,
@@ -64,7 +67,7 @@ MERGE (:Branch {bid: branchId, balance: 0})
 		return err
 	}
 
-	_, err = session.Run(`UNWIND range(1, $nTellers) AS tellerId 
+	err = runQ(session, `UNWIND range(1, $nTellers) AS tellerId 
 MERGE (t:Teller {tid: tellerId, balance: 0})
 `, map[string]interface{}{
 		"nTellers": numTellers,
@@ -73,7 +76,7 @@ MERGE (t:Teller {tid: tellerId, balance: 0})
 		return err
 	}
 
-	out.ReportProgress(ProgressReport{
+	out.ReportProgress(neobench.ProgressReport{
 		Section:      "init",
 		Step:         "create accounts",
 		Completeness: 0,
@@ -93,7 +96,7 @@ MERGE (t:Teller {tid: tellerId, balance: 0})
 		if endAccount <= startAccount {
 			continue
 		}
-		_, err = session.Run(`UNWIND range($startAccount, $endAccount) AS accountId 
+		err = runQ(session, `UNWIND range($startAccount, $endAccount) AS accountId 
 CREATE (a:Account {aid: accountId, balance: 0})
 `, map[string]interface{}{
 			"startAccount": startAccount,
@@ -102,7 +105,7 @@ CREATE (a:Account {aid: accountId, balance: 0})
 		if err != nil {
 			return err
 		}
-		out.ReportProgress(ProgressReport{
+		out.ReportProgress(neobench.ProgressReport{
 			Section:      "init",
 			Step:         "create accounts",
 			Completeness: float64(batchNo) / float64(numBatches),

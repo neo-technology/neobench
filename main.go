@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/rand"
 	"neobench/pkg/neobench"
+	"neobench/pkg/neobench/builtin"
 	"os"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 var fInitMode bool
 var fLatencyMode bool
 var fScale int64
+var fSeed int64
 var fClients int
 var fRate float64
 var fAddress string
@@ -137,10 +139,15 @@ Options:
 	}
 
 	if fInitMode {
-		err = initWorkload(fWorkloads, dbName, fScale, driver, out)
+		err = initWorkload(fWorkloads, dbName, fScale, seed, driver, out)
 		if err != nil {
 			log.Fatal(err)
 		}
+	}
+
+	if fDuration == 0 {
+		fmt.Printf("Duration (--duration) is 0, exiting without running any load\n")
+		os.Exit(0)
 	}
 
 	progressInterval := time.Duration(fProgress) * time.Second
@@ -251,13 +258,16 @@ func collectResults(databaseName, scenario string, out neobench.Output, concurre
 	return total, nil
 }
 
-func initWorkload(paths []string, dbName string, scale int64, driver neo4j.Driver, out neobench.Output) error {
+func initWorkload(paths []string, dbName string, scale, seed int64, driver neo4j.Driver, out neobench.Output) error {
 	for _, path := range paths {
 		if path == "builtin:tpcb-like" {
-			return neobench.InitTPCBLike(scale, dbName, driver, out)
+			return builtin.InitTPCBLike(scale, dbName, driver, out)
 		}
 		if path == "builtin:match-only" {
-			return neobench.InitTPCBLike(scale, dbName, driver, out)
+			return builtin.InitTPCBLike(scale, dbName, driver, out)
+		}
+		if path == "builtin:ldbc-like" {
+			return builtin.InitLDBCLike(scale, seed, dbName, driver, out)
 		}
 	}
 	return nil
@@ -265,11 +275,15 @@ func initWorkload(paths []string, dbName string, scale int64, driver neo4j.Drive
 
 func createScript(driver neo4j.Driver, dbName string, vars map[string]interface{}, path string, weight uint) (neobench.Script, error) {
 	if path == "builtin:tpcb-like" {
-		return neobench.Parse("builtin:tpcp-like", neobench.TPCBLike, weight)
+		return neobench.Parse("builtin:tpcp-like", builtin.TPCBLike, weight)
 	}
 
 	if path == "builtin:match-only" {
-		return neobench.Parse("builtin:match-only", neobench.MatchOnly, weight)
+		return neobench.Parse("builtin:match-only", builtin.MatchOnly, weight)
+	}
+
+	if path == "builtin:ldbc-like" {
+		return neobench.Parse("builtin:ldbc-like", builtin.LDBCLike, weight)
 	}
 
 	scriptContent, err := ioutil.ReadFile(path)

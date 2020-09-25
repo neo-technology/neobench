@@ -110,7 +110,7 @@ func (d *fakeDriver) WriteTransaction(work neo4j.TransactionWork, configurers ..
 		return nil, fmt.Errorf("induced error from test harness")
 	}
 
-	latency, err := exponentialRand(d.r, d.minLatency.Milliseconds(), d.maxLatency.Milliseconds(), 0.5)
+	latency, err := ExponentialRand(d.r, d.minLatency.Milliseconds(), d.maxLatency.Milliseconds(), 0.5)
 	if err != nil {
 		panic(err)
 	}

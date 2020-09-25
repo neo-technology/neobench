@@ -502,7 +502,7 @@ func (f CallExpr) Eval(ctx *ScriptContext) (interface{}, error) {
 		}
 
 		min, max := lb.iVal, ub.iVal
-		return exponentialRand(ctx.Rand, min, max, param.val)
+		return ExponentialRand(ctx.Rand, min, max, param.val)
 	case "random_gaussian":
 		lb, err := f.argAsNumber(0, ctx)
 		if err != nil {
@@ -644,7 +644,7 @@ func gaussianRand(random *rand.Rand, min, max int64, parameter float64) (int64, 
 }
 
 /* translated from pgbench.c */
-func exponentialRand(random *rand.Rand, min, max int64, parameter float64) (int64, error) {
+func ExponentialRand(random *rand.Rand, min, max int64, parameter float64) (int64, error) {
 	/* abort if wrong parameter, but must really be checked beforehand */
 	if parameter < 0.0 {
 		return 0, fmt.Errorf("parameter argument to random_exponential needs to be > 0")
