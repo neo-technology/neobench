@@ -59,7 +59,7 @@ func InitTPCBLike(scale int64, dbName string, driver neo4j.Driver, out neobench.
 		Completeness: 0,
 	})
 	err = runQ(session, `UNWIND range(1, $nBranches) AS branchId 
-MERGE (:Branch {bid: branchId, balance: 0})
+MERGE (b:Branch {bid: branchId}) SET b.balance = 0
 `, map[string]interface{}{
 		"nBranches": numBranches,
 	})
@@ -68,7 +68,7 @@ MERGE (:Branch {bid: branchId, balance: 0})
 	}
 
 	err = runQ(session, `UNWIND range(1, $nTellers) AS tellerId 
-MERGE (t:Teller {tid: tellerId, balance: 0})
+MERGE (t:Teller {tid: tellerId}) SET t.balance = 0
 `, map[string]interface{}{
 		"nTellers": numTellers,
 	})
@@ -92,7 +92,7 @@ MERGE (t:Teller {tid: tellerId, balance: 0})
 	numBatches := numAccounts / batchSize
 	for batchNo := int64(0); batchNo <= numBatches; batchNo++ {
 		startAccount := max(existingAccountNum, batchSize*batchNo+1)
-		endAccount := min(numAccounts, startAccount+batchSize)
+		endAccount := min(numAccounts, startAccount+batchSize) - 1
 		if endAccount <= startAccount {
 			continue
 		}
