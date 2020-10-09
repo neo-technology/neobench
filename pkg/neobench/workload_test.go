@@ -21,11 +21,11 @@ func TestChooseWeightedWorkload(t *testing.T) {
 		Commands: []Command{SetCommand{VarName: "a"}},
 	}
 	b := Script{
-		Weight:   uint(r.Intn(100)),
+		Weight:   float64(r.Intn(100)),
 		Commands: []Command{SetCommand{VarName: "b"}},
 	}
 	c := Script{
-		Weight:   uint(r.Intn(100)),
+		Weight:   float64(r.Intn(100)),
 		Commands: []Command{SetCommand{VarName: "c"}},
 	}
 	scripts := NewScripts(a, b, c)
@@ -42,9 +42,9 @@ func TestChooseWeightedWorkload(t *testing.T) {
 	cNorm := float64(distribution["c"]) / baseline
 
 	// Expect values to be within 10%
-	maxDiffOnB := float64(b.Weight) * 0.1
-	maxDiffOnC := float64(c.Weight) * 0.1
+	maxDiffOnB := b.Weight * 0.1
+	maxDiffOnC := c.Weight * 0.1
 
-	assert.InDelta(t, float64(b.Weight), bNorm, maxDiffOnB, "seed=%d", seed)
-	assert.InDelta(t, float64(c.Weight), cNorm, maxDiffOnC, "seed=%d", seed)
+	assert.InDelta(t, b.Weight, bNorm, maxDiffOnB, "seed=%d", seed)
+	assert.InDelta(t, c.Weight, cNorm, maxDiffOnC, "seed=%d", seed)
 }

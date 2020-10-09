@@ -175,3 +175,26 @@ func TestDebugFunction(t *testing.T) {
 	assert.Equal(t, int64(13370), uow.Statements[0].Params["blah"])
 	assert.Equal(t, "1337\n", stderr.String())
 }
+
+func TestComment(t *testing.T) {
+	vars := map[string]interface{}{"scale": int64(1)}
+	script, err := Parse("sleep", `
+// This is a comment on the set metacommand
+\set sleeptime 13 // this is a comment at end-of-line in a metacommand
+
+// This is a comment on a query
+RETURN 1;`, 1)
+
+	assert.NoError(t, err)
+	uow, err := script.Eval(ScriptContext{
+		Vars: vars,
+		Rand: rand.New(rand.NewSource(1337)),
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, []Statement{
+		{
+			Query:  "RETURN 1",
+			Params: map[string]interface{}{"sleeptime": int64(13), "scale": int64(1)},
+		},
+	}, uow.Statements)
+}
