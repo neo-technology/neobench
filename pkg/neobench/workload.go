@@ -32,7 +32,7 @@ type Scripts struct {
 func NewScripts(scripts ...Script) Scripts {
 	wr := &WeightedRandom{}
 	for _, script := range scripts {
-		wr.Add(script, int(script.Weight))
+		wr.Add(script, int(script.Weight*10000))
 	}
 
 	return Scripts{
@@ -98,7 +98,7 @@ func (w *WeightedRandom) Draw(r *rand.Rand) interface{} {
 type Script struct {
 	Name     string
 	Readonly bool
-	Weight   uint
+	Weight   float64
 	Commands []Command
 }
 

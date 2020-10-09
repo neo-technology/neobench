@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/neo4j/neo4j-go-driver/neo4j"
+	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
 	"io/ioutil"
 	"log"
@@ -114,29 +115,7 @@ Options:
 		log.Fatalf("-D and --define values must be integers or floats, failing to parse '%s': %s", v, err)
 	}
 
-	scripts := make([]neobench.Script, 0)
-	for _, path := range fWorkloads {
-		parts := strings.Split(path, "@")
-		weight := 1
-		if len(parts) > 1 {
-			weight, err = strconv.Atoi(parts[1])
-			if err != nil {
-				log.Fatalf("Failed to parse weight; value after @ symbol for workload weight must be an integer: %s", path)
-			}
-			path = parts[0]
-		}
-		script, err := createScript(driver, dbName, variables, path, uint(weight))
-		if err != nil {
-			log.Fatal(err)
-		}
-		scripts = append(scripts, script)
-	}
-
-	wrk := neobench.Workload{
-		Variables: variables,
-		Scripts:   neobench.NewScripts(scripts...),
-		Rand:      rand.New(rand.NewSource(seed)),
-	}
+	wrk, err := createWorkload(driver, dbName, variables, seed)
 
 	if fInitMode {
 		err = initWorkload(fWorkloads, dbName, fScale, seed, driver, out)
@@ -177,6 +156,119 @@ Options:
 			os.Exit(1)
 		}
 	}
+}
+
+func createWorkload(driver neo4j.Driver, dbName string, variables map[string]interface{}, seed int64) (neobench.Workload, error) {
+	var err error
+	scripts := make([]neobench.Script, 0)
+	for _, path := range fWorkloads {
+		parts := strings.Split(path, "@")
+		weight := 1.0
+		if len(parts) > 1 {
+			weight, err = strconv.ParseFloat(parts[1], 64)
+			if err != nil {
+				log.Fatalf("Failed to parse weight; value after @ symbol for workload weight must be a number: %s", path)
+			}
+			path = parts[0]
+		}
+
+		if strings.HasPrefix(path, "builtin:") {
+			builtinScripts, err := loadBuiltinWorkload(path, weight)
+			if err != nil {
+				return neobench.Workload{}, errors.Wrapf(err, "failed to load script '%s'", path)
+			}
+			scripts = append(scripts, builtinScripts...)
+		} else {
+			script, err := loadScript(driver, dbName, variables, path, weight)
+			if err != nil {
+				return neobench.Workload{}, errors.Wrapf(err, "failed to load script '%s'", path)
+			}
+			scripts = append(scripts, script)
+		}
+	}
+
+	return neobench.Workload{
+		Variables: variables,
+		Scripts:   neobench.NewScripts(scripts...),
+		Rand:      rand.New(rand.NewSource(seed)),
+	}, err
+}
+
+func loadScript(driver neo4j.Driver, dbName string, vars map[string]interface{}, path string, weight float64) (neobench.Script, error) {
+	scriptContent, err := ioutil.ReadFile(path)
+	if err != nil {
+		return neobench.Script{}, fmt.Errorf("failed to read workload file at %s: %s", path, err)
+	}
+
+	script, err := neobench.Parse(path, string(scriptContent), weight)
+	if err != nil {
+		return neobench.Script{}, err
+	}
+
+	readonly, err := neobench.WorkloadPreflight(driver, dbName, script, vars)
+	script.Readonly = readonly
+	return script, err
+}
+
+func loadBuiltinWorkload(path string, weight float64) ([]neobench.Script, error) {
+	if path == "builtin:tpcb-like" {
+		script, err := neobench.Parse("builtin:tpcp-like", builtin.TPCBLike, weight)
+		return []neobench.Script{script}, err
+	}
+
+	if path == "builtin:match-only" {
+		script, err := neobench.Parse("builtin:match-only", builtin.MatchOnly, weight)
+		return []neobench.Script{script}, err
+	}
+
+	if path == "builtin:ldbc-like" {
+		ic2Rate, ic6Rate, ic10Rate, ic14Rate := 37.0, 129.0, 30.0, 49.0
+		totalRate := ic2Rate + ic6Rate + ic10Rate + ic14Rate
+		ic2, err := neobench.Parse("builtin:ldbc-like/ic2", builtin.LDBCIC2, ic2Rate/totalRate*weight)
+		if err != nil {
+			return []neobench.Script{}, err
+		}
+		ic6, err := neobench.Parse("builtin:ldbc-like/ic6", builtin.LDBCIC6, ic6Rate/totalRate*weight)
+		if err != nil {
+			return []neobench.Script{}, err
+		}
+		ic10, err := neobench.Parse("builtin:ldbc-like/ic10", builtin.LDBCIC10, ic10Rate/totalRate*weight)
+		if err != nil {
+			return []neobench.Script{}, err
+		}
+		ic14, err := neobench.Parse("builtin:ldbc-like/ic14", builtin.LDBCIC14, ic14Rate/totalRate*weight)
+		if err != nil {
+			return []neobench.Script{}, err
+		}
+		return []neobench.Script{
+			ic2,
+			ic6,
+			ic10,
+			ic14,
+		}, err
+	}
+
+	if path == "builtin:ldbc-like/ic2" {
+		script, err := neobench.Parse("builtin:ldbc-like/ic2", builtin.LDBCIC2, weight)
+		return []neobench.Script{script}, err
+	}
+
+	if path == "builtin:ldbc-like/ic6" {
+		script, err := neobench.Parse("builtin:ldbc-like/ic6", builtin.LDBCIC6, weight)
+		return []neobench.Script{script}, err
+	}
+
+	if path == "builtin:ldbc-like/ic10" {
+		script, err := neobench.Parse("builtin:ldbc-like/ic10", builtin.LDBCIC10, weight)
+		return []neobench.Script{script}, err
+	}
+
+	if path == "builtin:ldbc-like/ic14" {
+		script, err := neobench.Parse("builtin:ldbc-like/ic14", builtin.LDBCIC14, weight)
+		return []neobench.Script{script}, err
+	}
+
+	return []neobench.Script{}, fmt.Errorf("unknown built-in workload: %s, supported built-in workloads are 'tpcb-like', 'match-only' and 'ldbc-like'", path)
 }
 
 func describeScenario() string {
@@ -271,34 +363,6 @@ func initWorkload(paths []string, dbName string, scale, seed int64, driver neo4j
 		}
 	}
 	return nil
-}
-
-func createScript(driver neo4j.Driver, dbName string, vars map[string]interface{}, path string, weight uint) (neobench.Script, error) {
-	if path == "builtin:tpcb-like" {
-		return neobench.Parse("builtin:tpcp-like", builtin.TPCBLike, weight)
-	}
-
-	if path == "builtin:match-only" {
-		return neobench.Parse("builtin:match-only", builtin.MatchOnly, weight)
-	}
-
-	if path == "builtin:ldbc-like" {
-		return neobench.Parse("builtin:ldbc-like", builtin.LDBCLike, weight)
-	}
-
-	scriptContent, err := ioutil.ReadFile(path)
-	if err != nil {
-		return neobench.Script{}, fmt.Errorf("failed to read workload file at %s: %s", path, err)
-	}
-
-	script, err := neobench.Parse(path, string(scriptContent), weight)
-	if err != nil {
-		return neobench.Script{}, err
-	}
-
-	readonly, err := neobench.WorkloadPreflight(driver, dbName, script, vars)
-	script.Readonly = readonly
-	return script, err
 }
 
 func awaitCompletion(stopCh chan struct{}, deadline time.Time, out neobench.Output, databaseName, scenario string, progressInterval time.Duration, recorders []*neobench.ResultRecorder) {

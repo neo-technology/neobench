@@ -6,13 +6,85 @@ import (
 	"github.com/pkg/errors"
 	"math/rand"
 	"neobench/pkg/neobench"
-	"strconv"
 	"time"
 )
 
-const LDBCLike = `
-\set aid random(1, 100000 * $scale)
-MATCH (account:Account {aid:$aid}) RETURN account.balance;
+const LDBCIC2 = `
+\set personId random(1, 9892 * $scale)
+
+MATCH (:Person {id:$personId})-[:KNOWS]-(friend),
+      (friend)<-[:HAS_CREATOR]-(message)
+WHERE message.creationDate <= date({year: 2010, month:10, day:10})
+RETURN friend.id AS personId,
+       friend.firstName AS personFirstName,
+       friend.lastName AS personLastName,
+       message.id AS messageId,
+       coalesce(message.content, message.imageFile) AS messageContent,
+       message.creationDate AS messageDate
+ORDER BY messageDate DESC, messageId ASC
+LIMIT 20
+`
+
+const LDBCIC6 = `
+\set personId random(1, 9892 * $scale)
+\set tagId random(1, 16080)
+
+MATCH (knownTag:Tag {name: "Tag-" + $tagId})
+MATCH (person:Person {id:$personId})-[:KNOWS*1..2]-(friend)
+WHERE NOT person=friend
+WITH DISTINCT friend, knownTag
+MATCH (friend)<-[:HAS_CREATOR]-(post)
+WHERE (post)-[:HAS_TAG]->(knownTag)
+WITH post, knownTag
+MATCH (post)-[:HAS_TAG]->(commonTag)
+WHERE NOT commonTag=knownTag
+WITH commonTag, count(post) AS postCount
+RETURN commonTag.name AS tagName, postCount
+ORDER BY postCount DESC, tagName ASC
+LIMIT 10;
+`
+
+const LDBCIC10 = `
+\set personId random(1, 9892 * $scale)
+\set birthdayMonth random(1, 13)
+
+MATCH (person:Person {id:$personId})-[:KNOWS*2..2]-(friend),
+       (friend)-[:IS_LOCATED_IN]->(city)
+WHERE NOT friend=person AND
+      NOT (friend)-[:KNOWS]-(person) AND
+            ( (friend.birthday.month=$birthdayMonth AND friend.birthday.day>=21) OR
+        (friend.birthday.month=($birthdayMonth%12)+1 AND friend.birthday.day<22) )
+WITH DISTINCT friend, city, person
+OPTIONAL MATCH (friend)<-[:HAS_CREATOR]-(post)
+WITH friend, city, collect(post) AS posts, person
+WITH friend,
+     city,
+     size(posts) AS postCount,
+     size([p IN posts WHERE (p)-[:HAS_TAG]->()<-[:HAS_INTEREST]-(person)]) AS commonPostCount
+RETURN friend.id AS personId,
+       friend.firstName AS personFirstName,
+       friend.lastName AS personLastName,
+       friend.gender AS personGender,
+       city.name AS personCityName,
+       commonPostCount - (postCount - commonPostCount) AS commonInterestScore
+ORDER BY commonInterestScore DESC, personId ASC
+LIMIT 10;
+`
+
+const LDBCIC14 = `
+\set personOne random(1, 9892 * $scale)
+\set personTwo random(1, 9892 * $scale)
+
+MATCH path = allShortestPaths((person1:Person {id:$personOne})-[:KNOWS*0..]-(person2:Person {id:$personTwo}))
+RETURN
+ [n IN nodes(path) | n.id] AS pathNodeIds,
+ reduce(weight=0.0, r IN relationships(path) |
+            weight +
+            size(()-[r]->()<-[:HAS_CREATOR]-(:Comment)-[:REPLY_OF]->(:Post)-[:HAS_CREATOR]->()-[r]->())*1.0 +
+            size(()<-[r]-()<-[:HAS_CREATOR]-(:Comment)-[:REPLY_OF]->(:Post)-[:HAS_CREATOR]->()<-[r]-())*1.0 +
+            size(()<-[r]-()-[:HAS_CREATOR]-(:Comment)-[:REPLY_OF]-(:Comment)-[:HAS_CREATOR]-()<-[r]-())*0.5
+ ) AS weight
+ORDER BY weight DESC;
 `
 
 const ldbcStartYear = 2002
@@ -53,6 +125,17 @@ func InitLDBCLike(scale, seed int64, dbName string, driver neo4j.Driver, out neo
 		return err
 	}
 	defer session.Close()
+
+	// Make sure we're working against a db with no ldbc data in it; we are not (yet!) reentrant
+	result, err := session.Run("MATCH (p:Person) RETURN COUNT(p) AS numPeople", nil)
+	if err != nil {
+		return err
+	}
+	result.Next()
+	preExistingPeople := int(result.Record().GetByIndex(0).(int64))
+	if preExistingPeople > 0 {
+		return fmt.Errorf("there appears to be data in the target database already; please note that the ldbc dataset generator is not yet re-entrant, it only works against empty graphs")
+	}
 
 	// Schema
 	err = ensureSchema(session, []schemaEntry{
@@ -180,13 +263,6 @@ MERGE (c)-[:HAS_TYPE]->(p)
 
 	// Helps us pick recent posts to act on
 	messageCountsPerForum := make([]int, 1, 32*1024)
-
-	result, err := session.Run("MATCH (p:Person) RETURN COUNT(p) AS numPeople", nil)
-	if err != nil {
-		return err
-	}
-	result.Next()
-	preExistingPeople := int(result.Record().GetByIndex(0).(int64))
 
 	signupCumulator := 0.0
 	peopleCreated := 0
@@ -459,14 +535,8 @@ MERGE (f)-[:HAS_TAG]->(t)
 		signupCumulator += signupsPerDay
 		for signupCumulator > 1 {
 			signupCumulator -= 1
-			if preExistingPeople < peopleCreated {
-				actions = append(actions, createLDBCPerson(random, session, peopleCreated+1, now, numCities, numUniversities, numCompanies, numTags))
-			}
+			actions = append(actions, createLDBCPerson(random, session, peopleCreated+1, now, numCities, numUniversities, numCompanies, numTags))
 			peopleCreated += 1
-		}
-
-		if preExistingPeople > peopleCreated {
-			continue
 		}
 
 		if peopleCreated < 2 {
@@ -752,13 +822,7 @@ func randLDBCTagClass(r *rand.Rand, numTagClasses int64) string {
 
 func randLDBCTag(r *rand.Rand, numTags int64) string {
 	i, _ := neobench.ExponentialRand(r, 0, numTags, 5.0)
-	// Doing the below with SprintF accounted for 10% of the runtime due to allocations,
-	// so this painful thing is in order to do it in a single allocation
-	prefix := "Tag-"
-	out := make([]byte, 0, len(prefix)+5)
-	copy(out, prefix)
-	strconv.AppendInt(out, i, 10)
-	return string(out)
+	return fmt.Sprintf("Tag-%d", i)
 }
 
 func randLDBCTags(r *rand.Rand, numTags int64) []string {

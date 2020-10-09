@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func Parse(filename, script string, weight uint) (Script, error) {
+func Parse(filename, script string, weight float64) (Script, error) {
 	var s scanner.Scanner
 	s.Init(strings.NewReader(script))
 	s.Filename = filename
@@ -96,7 +96,7 @@ func command(c *context) Command {
 	}()
 	c.s.Whitespace = 0
 	var b strings.Builder
-	for tok, content := c.Next(); tok != ';'; tok, content = c.Next() {
+	for tok, content := c.Next(); tok != ';' && tok != scanner.EOF; tok, content = c.Next() {
 		b.WriteString(content)
 	}
 	return QueryCommand{
