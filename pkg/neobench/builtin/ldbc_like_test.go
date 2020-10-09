@@ -25,7 +25,7 @@ func TestParseIC2(t *testing.T) {
 		{
 			Query: `MATCH (:Person {id:$personId})-[:KNOWS]-(friend),
       (friend)<-[:HAS_CREATOR]-(message)
-WHERE message.creationDate <= date(2010, 10, 10)
+WHERE message.creationDate <= date({year: 2010, month:10, day:10})
 RETURN friend.id AS personId,
        friend.firstName AS personFirstName,
        friend.lastName AS personLastName,
