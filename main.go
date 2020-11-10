@@ -21,32 +21,31 @@ import (
 var fInitMode bool
 var fLatencyMode bool
 var fScale int64
-var fSeed int64
 var fClients int
 var fRate float64
 var fAddress string
 var fUser string
 var fPassword string
 var fEncryptionMode string
-var fDuration int
-var fProgress int
+var fDuration time.Duration
+var fProgress time.Duration
 var fVariables map[string]string
 var fWorkloads []string
 var fOutputFormat string
 
 func init() {
-	pflag.BoolVarP(&fInitMode, "init", "i", false, "run in initialization mode; if using built-in workloads this creates the initial dataset")
+	pflag.BoolVarP(&fInitMode, "init", "i", false, "when running built-in workloads, run their built-in dataset generator first")
 	pflag.Int64VarP(&fScale, "scale", "s", 1, "sets the `scale` variable, impact depends on workload")
 	pflag.IntVarP(&fClients, "clients", "c", 1, "number of concurrent clients / sessions")
-	pflag.Float64VarP(&fRate, "rate", "r", 1, "in latency mode (see -l) this sets transactions per second, total across all clients")
-	pflag.StringVarP(&fAddress, "address", "a", "neo4j://localhost:7687", "address to connect to, eg. neo4j://mydb:7687")
+	pflag.Float64VarP(&fRate, "rate", "r", 1, "in latency mode (see -l) sets total transactions per second")
+	pflag.StringVarP(&fAddress, "address", "a", "neo4j://localhost:7687", "address to connect to")
 	pflag.StringVarP(&fUser, "user", "u", "neo4j", "username")
 	pflag.StringVarP(&fPassword, "password", "p", "neo4j", "password")
 	pflag.StringVarP(&fEncryptionMode, "encryption", "e", "auto", "whether to use encryption, `auto`, `true` or `false`")
-	pflag.IntVarP(&fDuration, "duration", "d", 60, "seconds to run")
-	pflag.IntVar(&fProgress, "progress", 10, "interval, in seconds, to report progress")
+	pflag.DurationVarP(&fDuration, "duration", "d", 60*time.Second, "duration to run, ex: 15s, 1m, 10h")
+	pflag.DurationVar(&fProgress, "progress", 10*time.Second, "interval to report progress, ex: 15s, 1m, 1h")
 	pflag.StringToStringVarP(&fVariables, "define", "D", nil, "defines variables for workload scripts and query parameters")
-	pflag.StringSliceVarP(&fWorkloads, "workload", "w", []string{"builtin:tpcb-like"}, "workload to run, either a builtin: one or a path to a workload script")
+	pflag.StringSliceVarP(&fWorkloads, "workload", "w", []string{"builtin:tpcb-like"}, "path to workload script or builtin:[tpcb-like,ldbc-like]")
 	pflag.BoolVarP(&fLatencyMode, "latency", "l", false, "run in latency testing more rather than throughput mode")
 	pflag.StringVarP(&fOutputFormat, "output", "o", "auto", "output format, `auto`, `interactive` or `csv`")
 }
@@ -69,7 +68,6 @@ Options:
 	}
 
 	seed := time.Now().Unix()
-	runtime := time.Duration(fDuration) * time.Second
 	scenario := describeScenario()
 
 	out, err := neobench.NewOutput(fOutputFormat)
@@ -132,10 +130,8 @@ Options:
 		os.Exit(0)
 	}
 
-	progressInterval := time.Duration(fProgress) * time.Second
-
 	if fLatencyMode {
-		result, err := runBenchmark(driver, fAddress, dbName, scenario, out, wrk, runtime, fLatencyMode, fClients, fRate, progressInterval)
+		result, err := runBenchmark(driver, fAddress, dbName, scenario, out, wrk, fDuration, fLatencyMode, fClients, fRate, fProgress)
 		if err != nil {
 			out.Errorf(err.Error())
 			os.Exit(1)
@@ -147,7 +143,7 @@ Options:
 			os.Exit(1)
 		}
 	} else {
-		result, err := runBenchmark(driver, fAddress, dbName, scenario, out, wrk, runtime, fLatencyMode, fClients, fRate, progressInterval)
+		result, err := runBenchmark(driver, fAddress, dbName, scenario, out, wrk, fDuration, fLatencyMode, fClients, fRate, fProgress)
 		if err != nil {
 			out.Errorf(err.Error())
 			os.Exit(1)
