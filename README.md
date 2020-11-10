@@ -26,7 +26,7 @@ Alternatively you can build from source by checking out this repo and running `m
 
     # Run the "TPCB-like" workload for 60 seconds against the default url, neo4j://localhost:7687
     # in throughput testing mode and with one single worker / session
-    $ neobench -d 60
+    $ neobench -d 60s
     
     # Same as above, except measure latency instead of throughput and with concurrent load
     $ neobench --latency --clients 4
@@ -41,23 +41,21 @@ Alternatively you can build from source by checking out this repo and running `m
 # Usage
 
 ```
-Usage:
-  neobench [OPTION]... [DBNAME]
-
 Options:
   -a, --address string          address to connect to, eg. neo4j://mydb:7687 (default "neo4j://localhost:7687")
   -c, --clients int             number of concurrent clients / sessions (default 1)
   -D, --define stringToString   defines variables for workload scripts and query parameters (default [])
-  -d, --duration int            seconds to run (default 60)
+  -d, --duration duration       duration to run, ex: 15s, 1m, 10h (default 1m0s)
   -e, --encryption auto         whether to use encryption, auto, `true` or `false` (default "auto")
-  -i, --init                    run in initialization mode; if using built-in workloads this creates the initial dataset
+  -i, --init                    when running built-in workloads, run their built-in dataset generator first
   -l, --latency                 run in latency testing more rather than throughput mode
   -o, --output auto             output format, auto, `interactive` or `csv` (default "auto")
   -p, --password string         password (default "neo4j")
-  -r, --rate float              in latency mode (see -l) this sets transactions per second, total across all clients (default 1)
+      --progress duration       interval to report progress, ex: 15s, 1m, 1h (default 10s)
+  -r, --rate float              in latency mode (see -l) sets total transactions per second (default 1)
   -s, --scale scale             sets the scale variable, impact depends on workload (default 1)
   -u, --user string             username (default "neo4j")
-  -w, --workload strings        workload to run, either a builtin: one or a path to a workload script (default [builtin:tpcb-like])
+  -w, --workload strings        path to workload script or builtin:[tpcb-like,ldbc-like] (default [builtin:tpcb-like])
 ```
 
 # Exit codes
