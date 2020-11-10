@@ -116,11 +116,14 @@ Options:
 	}
 
 	wrk, err := createWorkload(driver, dbName, variables, seed)
+	if err != nil {
+		log.Fatalf("%+v", err)
+	}
 
 	if fInitMode {
 		err = initWorkload(fWorkloads, dbName, fScale, seed, driver, out)
 		if err != nil {
-			log.Fatal(err)
+			log.Fatalf("%+v", err)
 		}
 	}
 
