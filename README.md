@@ -94,6 +94,18 @@ The following meta-commands are currently supported:
 
 All expressions supported by pgbench 10 are supported, please see the pgbench docs linked above.
 
+Beyond the pgbench expressions, neobench also supports lists:
+
+    \set myLiteralList [1,2,[3]]
+    \set myRange range(1,10) // inclusive on both sides to match cypher range()
+
+For simulating simple bulk-insert operations, there is `random_matrix`.
+This function generates a matrix with each column populated with a random integer in a specified range:
+
+    // Generates a 100-row matrix with 3 columns.
+    // The first column will have random values between [1,5], the second [1,100] and the third [-10,10].
+    \set myMatrix random_matrix(100, [1, 5], [1, 100], [-10, 10])
+
 # Contributions
 
 Minor contributions? Just open a PR. 
