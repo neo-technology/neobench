@@ -1,3 +1,5 @@
 \set myparam random(1, 10 * $scale) + $myvar
+\set batchSize 10
+\set myBatch range($nbWorkerId * $batchSize, $nbWorkerId * $batchSize + $batchSize)
 
-MATCH (n) RETURN id(n) LIMIT 1;
+MATCH (n) RETURN id(n), $myBatch LIMIT 1;

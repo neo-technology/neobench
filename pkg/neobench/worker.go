@@ -49,7 +49,7 @@ func (w *Worker) RunBenchmark(wrk ClientWorkload, databaseName string, transacti
 		default:
 		}
 
-		uow, err := wrk.Next()
+		uow, err := wrk.Next(w.workerId)
 		if err != nil {
 			return WorkerResult{WorkerId: w.workerId, Error: err}
 		}

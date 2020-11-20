@@ -11,6 +11,9 @@ import (
 	"time"
 )
 
+// Useful for creating sharded workloads or other logic that tie in session-esque concepts
+const WorkerIdVar = "nbWorkerId"
+
 type Workload struct {
 	// set on command line and built in
 	Variables map[string]interface{}
@@ -143,16 +146,11 @@ type ClientWorkload struct {
 	Stderr    io.Writer
 }
 
-func (s *ClientWorkload) Next() (UnitOfWork, error) {
-	vars := make(map[string]interface{})
-	for k, v := range s.Variables {
-		vars[k] = v
-	}
-
+func (s *ClientWorkload) Next(workerId int64) (UnitOfWork, error) {
 	script := s.Scripts.Choose(s.Rand)
 	return script.Eval(ScriptContext{
 		Stderr: s.Stderr,
-		Vars:   vars,
+		Vars:   createVars(s.Variables, workerId),
 		Rand:   s.Rand,
 	})
 }
@@ -230,9 +228,10 @@ func WorkloadPreflight(driver neo4j.Driver, dbName string, script Script, vars m
 		return false, err
 	}
 	r := rand.New(rand.NewSource(1337))
+
 	unitOfWork, err := script.Eval(ScriptContext{
 		Stderr: os.Stderr,
-		Vars:   vars,
+		Vars:   createVars(vars, 0),
 		Rand:   r,
 	})
 	if err != nil {
@@ -259,4 +258,13 @@ func WorkloadPreflight(driver neo4j.Driver, dbName string, script Script, vars m
 	}
 	readonly = readonlyRaw.(bool)
 	return
+}
+
+func createVars(globalVars map[string]interface{}, workerId int64) map[string]interface{} {
+	vars := make(map[string]interface{})
+	vars[WorkerIdVar] = workerId
+	for k, v := range globalVars {
+		vars[k] = v
+	}
+	return vars
 }
