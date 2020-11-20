@@ -2,6 +2,7 @@ package neobench
 
 import (
 	"fmt"
+	"github.com/pkg/errors"
 	"math"
 	"math/rand"
 	"strconv"
@@ -236,6 +237,21 @@ func factor(c *context) Expression {
 	} else if tok == '$' {
 		varName := ident(c)
 		return Expression{Kind: varExpr, Payload: varName}
+	} else if tok == '[' {
+		list := make([]Expression, 0)
+		tok := c.Peek()
+		for tok != ']' {
+			if len(list) > 0 {
+				expect(c, ',')
+			}
+			list = append(list, expr(c))
+			if c.done {
+				return Expression{}
+			}
+			tok = c.Peek()
+		}
+		c.Next()
+		return Expression{Kind: listExpr, Payload: list}
 	} else {
 		c.fail(fmt.Errorf("unexpected token, expected Expression: %s", scanner.TokenString(tok)))
 		return Expression{}
@@ -252,11 +268,17 @@ func expect(c *context, expected rune) {
 type ExprKind uint8
 
 const (
-	nullExpr  ExprKind = 0
-	intExpr   ExprKind = 1
+	nullExpr ExprKind = 0
+	// payload int64
+	intExpr ExprKind = 1
+	// payload float64
 	floatExpr ExprKind = 2
-	callExpr  ExprKind = 3
-	varExpr   ExprKind = 4
+	// payload []Expression
+	listExpr ExprKind = 3
+	// payload []CallExpr
+	callExpr ExprKind = 4
+	// payload string (varname)
+	varExpr ExprKind = 5
 )
 
 func (e ExprKind) String() string {
@@ -267,6 +289,7 @@ var exprKindNames = []string{
 	nullExpr:  "N/A",
 	intExpr:   "int",
 	floatExpr: "double",
+	listExpr:  "list",
 	callExpr:  "call",
 	varExpr:   "var",
 }
@@ -280,6 +303,17 @@ func (e Expression) Eval(ctx *ScriptContext) (interface{}, error) {
 	switch e.Kind {
 	case intExpr, floatExpr:
 		return e.Payload, nil
+	case listExpr:
+		innerExprs := e.Payload.([]Expression)
+		out := make([]interface{}, 0, len(innerExprs))
+		for _, innerExpr := range innerExprs {
+			exprResult, err := innerExpr.Eval(ctx)
+			if err != nil {
+				return nil, errors.Wrapf(err, "error when evaluating %s", e)
+			}
+			out = append(out, exprResult)
+		}
+		return out, nil
 	case varExpr:
 		value, found := ctx.Vars[e.Payload.(string)]
 		if !found {
@@ -299,6 +333,8 @@ func (e Expression) String() string {
 		return fmt.Sprintf("%d", e.Payload)
 	case floatExpr:
 		return fmt.Sprintf("%f", e.Payload)
+	case listExpr:
+		return fmt.Sprintf("%v", e.Payload)
 	case callExpr:
 		return e.Payload.(CallExpr).String()
 	case varExpr:
@@ -527,6 +563,22 @@ func (f CallExpr) Eval(ctx *ScriptContext) (interface{}, error) {
 
 		min, max := lb.iVal, ub.iVal
 		return gaussianRand(ctx.Rand, min, max, param.val)
+	case "range":
+		lb, err := f.argAsNumber(0, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+		}
+		ub, err := f.argAsNumber(1, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+		}
+
+		if lb.isDouble || ub.isDouble {
+			return nil, fmt.Errorf("interval for range() must be integers, not doubles, in %s", f.String())
+		}
+
+		min, max := lb.iVal, ub.iVal
+		return rangeFn(min, max)
 	case "*":
 		a, err := f.argAsNumber(0, ctx)
 		if err != nil {
@@ -586,6 +638,15 @@ func (f CallExpr) Eval(ctx *ScriptContext) (interface{}, error) {
 	default:
 		return nil, fmt.Errorf("unknown function: %s", f.String())
 	}
+}
+
+// Range, inclusive on both bounds to match cypher
+func rangeFn(min, max int64) (interface{}, error) {
+	out := make([]interface{}, 0, max-min)
+	for i := min; i <= max; i++ {
+		out = append(out, i)
+	}
+	return out, nil
 }
 
 const minGaussianParam = 2.0

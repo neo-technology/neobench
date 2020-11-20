@@ -82,6 +82,9 @@ func TestExpressions(t *testing.T) {
 		"9999999000":  int64(9999999000),
 		"-9999999000": int64(-9999999000),
 
+		// Composites
+		"[1, 2, [3]]": []interface{}{int64(1), int64(2), []interface{}{int64(3)}},
+
 		// Single-operator arithmetic
 		"1 * 2":     int64(2),
 		"1 * 2 * 4": int64(8),
@@ -128,6 +131,7 @@ func TestExpressions(t *testing.T) {
 		"random_gaussian(1, 10, 2.5)":    int64(3),
 		"random_exponential(1, 10, 2.5)": int64(4),
 		"sqrt(2.0)":                      1.414213562,
+		"range(1, 5)":                    []interface{}{int64(1), int64(2), int64(3), int64(4), int64(5)},
 	}
 
 	for expr, expected := range tc {
@@ -145,7 +149,7 @@ RETURN 1;`, expr), 1)
 				Vars: vars,
 				Rand: rand.New(rand.NewSource(1337)),
 			})
-			assert.NoError(t, err)
+			assert.NoError(t, err, "%+v", err)
 			actual := uow.Statements[0].Params["v"]
 			if expectedFloat, ok := expected.(float64); ok {
 				assert.InDelta(t, expectedFloat, actual, 0.00001)

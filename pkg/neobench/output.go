@@ -153,8 +153,8 @@ func (o *InteractiveOutput) BenchmarkStart(databaseName, url, scenario string) {
 		databaseName = "<default>"
 	}
 	_, err := fmt.Fprintf(o.ErrStream,
-		"Starting workload on database %s against %s\n" +
-		"Scenario: %s\n", databaseName, url, scenario)
+		"Starting workload on database %s against %s\n"+
+			"Scenario: %s\n", databaseName, url, scenario)
 	if err != nil {
 		panic(err)
 	}
@@ -281,8 +281,8 @@ func (o *CsvOutput) BenchmarkStart(databaseName, url, scenario string) {
 		databaseName = "<default>"
 	}
 	_, err := fmt.Fprintf(o.ErrStream,
-		"Starting workload on database %s against %s\n" +
-		"Scenario: %s\n", databaseName, url, scenario)
+		"Starting workload on database %s against %s\n"+
+			"Scenario: %s\n", databaseName, url, scenario)
 	if err != nil {
 		panic(err)
 	}
