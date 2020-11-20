@@ -277,7 +277,7 @@ func describeScenario() string {
 	}
 	out.WriteString(fmt.Sprintf(" -c %d", fClients))
 	out.WriteString(fmt.Sprintf(" -s %d", fScale))
-	out.WriteString(fmt.Sprintf(" -d %d", fDuration))
+	out.WriteString(fmt.Sprintf(" -d %s", fDuration))
 	out.WriteString(fmt.Sprintf(" -e %s", fEncryptionMode))
 	if fLatencyMode {
 		out.WriteString(fmt.Sprintf(" -l -r %.3f", fRate))
