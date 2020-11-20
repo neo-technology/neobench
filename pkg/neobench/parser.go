@@ -167,6 +167,16 @@ func term(c *context) Expression {
 					args: []Expression{lhs, rhs},
 				},
 			}
+		} else if tok == '%' {
+			c.Next()
+			rhs := factor(c)
+			lhs = Expression{
+				Kind: callExpr,
+				Payload: CallExpr{
+					name: "%",
+					args: []Expression{lhs, rhs},
+				},
+			}
 		} else {
 			return lhs
 		}
@@ -628,6 +638,24 @@ func (f CallExpr) Eval(ctx *ScriptContext) (interface{}, error) {
 		}
 
 		return a.val / b.val, nil
+	case "%":
+		a, err := f.argAsNumber(0, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+		}
+		b, err := f.argAsNumber(1, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+		}
+
+		if a.isDouble {
+			return nil, fmt.Errorf("modulo ('%%') needs both sides to be integers, but %s is a float", f.args[0].String())
+		}
+		if b.isDouble {
+			return nil, fmt.Errorf("modulo ('%%') needs both sides to be integers, but %s is a float", f.args[1].String())
+		}
+
+		return a.iVal % b.iVal, nil
 	case "+":
 		a, err := f.argAsNumber(0, ctx)
 		if err != nil {

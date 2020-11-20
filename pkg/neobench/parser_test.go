@@ -89,6 +89,8 @@ func TestExpressions(t *testing.T) {
 		"1 * 2":     int64(2),
 		"1 * 2 * 4": int64(8),
 		"-1 * 1337": int64(-1337),
+		"7 % 8":     int64(7),
+		"6 % 6":     int64(0),
 
 		"2 / 2":      float64(1),
 		"16 / 2 / 2": float64(4),
