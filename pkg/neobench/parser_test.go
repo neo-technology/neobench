@@ -132,6 +132,9 @@ func TestExpressions(t *testing.T) {
 		"random_exponential(1, 10, 2.5)": int64(4),
 		"sqrt(2.0)":                      1.414213562,
 		"range(1, 5)":                    []interface{}{int64(1), int64(2), int64(3), int64(4), int64(5)},
+		"random_matrix(2, [1,5], [5,8])": []interface{}{
+			[]interface{}{int64(3), int64(5)},
+			[]interface{}{int64(1), int64(5)}},
 	}
 
 	for expr, expected := range tc {

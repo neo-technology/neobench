@@ -513,8 +513,7 @@ func (f CallExpr) Eval(ctx *ScriptContext) (interface{}, error) {
 			return lb.iVal, nil
 		}
 
-		min, max := lb.iVal, ub.iVal
-		return min + ctx.Rand.Int63n(max-min), nil
+		return uniformRand(ctx.Rand, lb.iVal, ub.iVal), nil
 	case "random_exponential":
 		lb, err := f.argAsNumber(0, ctx)
 		if err != nil {
@@ -579,6 +578,30 @@ func (f CallExpr) Eval(ctx *ScriptContext) (interface{}, error) {
 
 		min, max := lb.iVal, ub.iVal
 		return rangeFn(min, max)
+	case "random_matrix":
+		numRows, err := f.argAsNumber(0, ctx)
+		if err != nil || numRows.isDouble {
+			return nil, errors.Wrapf(err, "random_matrix numRows must be integer, in %s", f.String())
+		}
+
+		spec := make([][]int64, 0)
+		for i := 1; i < len(f.args); i++ {
+			rawRowSpec, err := f.args[i].Eval(ctx)
+			if err != nil {
+				return nil, errors.Wrapf(err, "in %s at %s", f.String(), f.args[i].String())
+			}
+			rowSpec, ok := rawRowSpec.([]interface{})
+			if !ok || len(rowSpec) != 2 {
+				return nil, fmt.Errorf("random_matrix column specs should be 2-integer lists specifying the range in that column, like '[1,14]', got %s", f.args[i].String())
+			}
+			min, minOk := rowSpec[0].(int64)
+			max, maxOk := rowSpec[1].(int64)
+			if !minOk || !maxOk {
+				return nil, fmt.Errorf("random_matrix column random range should be integers, like '[1,14]', got %s", f.args[i].String())
+			}
+			spec = append(spec, []int64{min, max})
+		}
+		return randomMatrix(ctx.Rand, numRows.iVal, spec), nil
 	case "*":
 		a, err := f.argAsNumber(0, ctx)
 		if err != nil {
@@ -647,6 +670,25 @@ func rangeFn(min, max int64) (interface{}, error) {
 		out = append(out, i)
 	}
 	return out, nil
+}
+
+// Generates a random matrix with the given number of rows.
+// Each cell has a random integer value within the range given by columnSpec; each entry in the spec a 2-tuple
+func randomMatrix(random *rand.Rand, numRows int64, columnSpec [][]int64) []interface{} {
+	out := make([]interface{}, 0, numRows)
+	for i := 0; i < int(numRows); i++ {
+		row := make([]interface{}, len(columnSpec))
+		for col := 0; col < len(columnSpec); col++ {
+			min, max := columnSpec[col][0], columnSpec[col][1]
+			row[col] = uniformRand(random, min, max)
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+func uniformRand(random *rand.Rand, min, max int64) int64 {
+	return min + random.Int63n(max-min)
 }
 
 const minGaussianParam = 2.0
