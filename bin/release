@@ -12,6 +12,10 @@ main() {
   echo -n "Type next version: "
   read version
 
+  if [[ "$(git tag -l | grep "${version}")" == "${version}" ]]; then
+    echo "${version} already exists"
+    exit 1
+  fi
 
   echo -n "Release [${version}]? [yN]"
   read choice
