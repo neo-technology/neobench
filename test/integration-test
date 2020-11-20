@@ -102,9 +102,12 @@ test_error_exit_codes() {
   fi
 
   # Note the very long timeout as a hacky way to make sure we exit immediately rather than fail after
-  "${NEOBENCH_PATH}" -p wontwork -w "${SCRIPTPATH}/syntaxerror.script" -d 1y > "${out}" 2>&1 || exitcode="$?"
+  "${NEOBENCH_PATH}" -p wontwork -w "${SCRIPTPATH}/syntaxerror.script" -d 1h > "${out}" 2>&1 || exitcode="$?"
   if [[ "${exitcode}" != "1" ]]; then
     echo >&2 "Expected command to exit with code 1 if given syntax error, got ${exitcode}"
+    echo >&2 "== stdout+stderr =="
+    cat "${out}" >&2
+    echo >&2 "== /stdout+stderr =="
     exit 1
   fi
 }
