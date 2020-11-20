@@ -101,7 +101,8 @@ type ScriptResult struct {
 }
 
 type Output interface {
-	BenchmarkStart(databaseName, url string)
+	// scenario is a string describing the flags you'd need to pass to neobench to run an equivalent load
+	BenchmarkStart(databaseName, url, scenario string)
 	ReportProgress(report ProgressReport)
 	ReportWorkloadProgress(completeness float64, checkpoint Result)
 	ReportThroughput(result Result)
@@ -147,11 +148,13 @@ type InteractiveOutput struct {
 	LastProgressTime   time.Time
 }
 
-func (o *InteractiveOutput) BenchmarkStart(databaseName, address string) {
+func (o *InteractiveOutput) BenchmarkStart(databaseName, url, scenario string) {
 	if databaseName == "" {
 		databaseName = "<default>"
 	}
-	_, err := fmt.Fprintf(o.ErrStream, "Starting workload on database %s against %s\n", databaseName, address)
+	_, err := fmt.Fprintf(o.ErrStream,
+		"Starting workload on database %s against %s\n" +
+		"Scenario: %s\n", databaseName, url, scenario)
 	if err != nil {
 		panic(err)
 	}
@@ -273,11 +276,13 @@ type CsvOutput struct {
 	LastProgressTime   time.Time
 }
 
-func (o *CsvOutput) BenchmarkStart(databaseName, address string) {
+func (o *CsvOutput) BenchmarkStart(databaseName, url, scenario string) {
 	if databaseName == "" {
 		databaseName = "<default>"
 	}
-	_, err := fmt.Fprintf(o.ErrStream, "Starting workload on database %s against %s\n", databaseName, address)
+	_, err := fmt.Fprintf(o.ErrStream,
+		"Starting workload on database %s against %s\n" +
+		"Scenario: %s\n", databaseName, url, scenario)
 	if err != nil {
 		panic(err)
 	}

@@ -298,7 +298,7 @@ func runBenchmark(driver neo4j.Driver, url, databaseName, scenario string, out n
 		ratePerWorkerDuration = neobench.TotalRatePerSecondToDurationPerClient(numClients, rate)
 	}
 
-	out.BenchmarkStart(databaseName, url)
+	out.BenchmarkStart(databaseName, url, scenario)
 
 	resultChan := make(chan neobench.WorkerResult, numClients)
 	resultRecorders := make([]*neobench.ResultRecorder, 0)
