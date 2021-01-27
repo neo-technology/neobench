@@ -160,6 +160,7 @@ Options:
 func createWorkload(driver neo4j.Driver, dbName string, variables map[string]interface{}, seed int64) (neobench.Workload, error) {
 	var err error
 	scripts := make([]neobench.Script, 0)
+	csvLoader := neobench.NewCsvLoader()
 	for _, path := range fWorkloads {
 		parts := strings.Split(path, "@")
 		weight := 1.0
@@ -178,7 +179,7 @@ func createWorkload(driver neo4j.Driver, dbName string, variables map[string]int
 			}
 			scripts = append(scripts, builtinScripts...)
 		} else {
-			script, err := loadScript(driver, dbName, variables, path, weight)
+			script, err := loadScript(driver, dbName, variables, path, weight, csvLoader)
 			if err != nil {
 				return neobench.Workload{}, errors.Wrapf(err, "failed to load script '%s'", path)
 			}
@@ -190,10 +191,12 @@ func createWorkload(driver neo4j.Driver, dbName string, variables map[string]int
 		Variables: variables,
 		Scripts:   neobench.NewScripts(scripts...),
 		Rand:      rand.New(rand.NewSource(seed)),
+		CsvLoader: csvLoader,
 	}, err
 }
 
-func loadScript(driver neo4j.Driver, dbName string, vars map[string]interface{}, path string, weight float64) (neobench.Script, error) {
+func loadScript(driver neo4j.Driver, dbName string, vars map[string]interface{}, path string, weight float64,
+	csvLoader *neobench.CsvLoader) (neobench.Script, error) {
 	scriptContent, err := ioutil.ReadFile(path)
 	if err != nil {
 		return neobench.Script{}, fmt.Errorf("failed to read workload file at %s: %s", path, err)
@@ -204,7 +207,7 @@ func loadScript(driver neo4j.Driver, dbName string, vars map[string]interface{},
 		return neobench.Script{}, err
 	}
 
-	readonly, err := neobench.WorkloadPreflight(driver, dbName, script, vars)
+	readonly, err := neobench.WorkloadPreflight(driver, dbName, script, vars, csvLoader)
 	script.Readonly = readonly
 	return script, err
 }

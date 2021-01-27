@@ -439,6 +439,22 @@ func (f CallExpr) argAsNumber(i int, ctx *ScriptContext) (Number, error) {
 	}
 }
 
+func (f CallExpr) argAsString(i int, ctx *ScriptContext) (string, error) {
+	if len(f.args) <= i {
+		return "", fmt.Errorf("expected at least %d arguments, got %d", i+1, len(f.args))
+	}
+	value, err := f.args[i].Eval(ctx)
+	if err != nil {
+		return "", err
+	}
+	switch value.(type) {
+	case string:
+		return value.(string), nil
+	default:
+		return "", fmt.Errorf("expected string, got %s (which is %T)", f.args[i].String(), value)
+	}
+}
+
 func (f CallExpr) Eval(ctx *ScriptContext) (interface{}, error) {
 	switch f.name {
 	case "abs":
@@ -665,6 +681,12 @@ func (f CallExpr) Eval(ctx *ScriptContext) (interface{}, error) {
 			spec = append(spec, []int64{min, max})
 		}
 		return randomMatrix(ctx.Rand, numRows.iVal, spec), nil
+	case "csv":
+		path, err := f.argAsString(0, ctx)
+		if err != nil {
+			return nil, errors.Wrap(err, "csv(..) takes string as argument")
+		}
+		return ctx.CsvLoader.Load(path)
 	case "*":
 		a, err := f.argAsNumber(0, ctx)
 		if err != nil {

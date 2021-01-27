@@ -20,7 +20,8 @@ type Workload struct {
 
 	Scripts Scripts
 
-	Rand *rand.Rand
+	Rand      *rand.Rand
+	CsvLoader *CsvLoader
 }
 
 // Scripts in a workload, and utilities to draw a weighted random script
@@ -105,10 +106,13 @@ type Script struct {
 	Commands []Command
 }
 
+// Context that scripts are executed in; these are not thread safe, and are re-created on each script
+// invocation, so need to be kept lightish.
 type ScriptContext struct {
-	Stderr io.Writer
-	Vars   map[string]interface{}
-	Rand   *rand.Rand
+	Stderr    io.Writer
+	Vars      map[string]interface{}
+	Rand      *rand.Rand
+	CsvLoader *CsvLoader
 }
 
 // Evaluate this script in the given context
@@ -134,6 +138,7 @@ func (s *Workload) NewClient() ClientWorkload {
 		Scripts:   s.Scripts,
 		Rand:      rand.New(rand.NewSource(s.Rand.Int63())),
 		Stderr:    os.Stderr,
+		CsvLoader: s.CsvLoader,
 	}
 }
 
@@ -144,14 +149,16 @@ type ClientWorkload struct {
 	Scripts   Scripts
 	Rand      *rand.Rand
 	Stderr    io.Writer
+	CsvLoader *CsvLoader
 }
 
 func (s *ClientWorkload) Next(workerId int64) (UnitOfWork, error) {
 	script := s.Scripts.Choose(s.Rand)
 	return script.Eval(ScriptContext{
-		Stderr: s.Stderr,
-		Vars:   createVars(s.Variables, workerId),
-		Rand:   s.Rand,
+		Stderr:    s.Stderr,
+		Vars:      createVars(s.Variables, workerId),
+		Rand:      s.Rand,
+		CsvLoader: s.CsvLoader,
 	})
 }
 
@@ -221,7 +228,8 @@ func (c SleepCommand) Execute(ctx *ScriptContext, uow *UnitOfWork) error {
 }
 
 // Validates that a workload doesn't have syntax errors etc, and tells us if it is read-only
-func WorkloadPreflight(driver neo4j.Driver, dbName string, script Script, vars map[string]interface{}) (readonly bool, err error) {
+func WorkloadPreflight(driver neo4j.Driver, dbName string, script Script, vars map[string]interface{},
+	csvLoader *CsvLoader) (readonly bool, err error) {
 	session, err := driver.NewSession(neo4j.SessionConfig{
 		AccessMode:   neo4j.AccessModeWrite,
 		DatabaseName: dbName,
@@ -232,9 +240,10 @@ func WorkloadPreflight(driver neo4j.Driver, dbName string, script Script, vars m
 	r := rand.New(rand.NewSource(1337))
 
 	unitOfWork, err := script.Eval(ScriptContext{
-		Stderr: os.Stderr,
-		Vars:   createVars(vars, 0),
-		Rand:   r,
+		Stderr:    os.Stderr,
+		Vars:      createVars(vars, 0),
+		Rand:      r,
+		CsvLoader: csvLoader,
 	})
 	if err != nil {
 		return false, err
