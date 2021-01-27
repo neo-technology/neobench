@@ -172,12 +172,14 @@ type Command interface {
 
 type QueryCommand struct {
 	Query string
+	// Parameters used in the above query
+	Params []string
 }
 
 func (c QueryCommand) Execute(ctx *ScriptContext, uow *UnitOfWork) error {
 	params := make(map[string]interface{})
-	for k, v := range ctx.Vars {
-		params[k] = v
+	for _, pname := range c.Params {
+		params[pname] = ctx.Vars[pname]
 	}
 	uow.Statements = append(uow.Statements, Statement{
 		Query:  c.Query,

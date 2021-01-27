@@ -20,27 +20,26 @@ func TestParseTpcBLike(t *testing.T) {
 	if err != nil {
 		return
 	}
-	params := map[string]interface{}{"aid": int64(90704), "bid": int64(1), "delta": int64(-3348), "scale": int64(1), "tid": int64(1)}
 	assert.Equal(t, []neobench.Statement{
 		{
 			Query:  "MATCH (account:Account {aid:$aid}) \nSET account.balance = account.balance + $delta",
-			Params: params,
+			Params: map[string]interface{}{"aid": int64(90704), "delta": int64(-3348)},
 		},
 		{
 			Query:  "MATCH (account:Account {aid:$aid}) RETURN account.balance",
-			Params: params,
+			Params: map[string]interface{}{"aid": int64(90704)},
 		},
 		{
 			Query:  "MATCH (teller:Tellers {tid: $tid}) SET teller.balance = teller.balance + $delta",
-			Params: params,
+			Params: map[string]interface{}{"delta": int64(-3348), "tid": int64(1)},
 		},
 		{
 			Query:  "MATCH (branch:Branch {bid: $bid}) SET branch.balance = branch.balance + $delta",
-			Params: params,
+			Params: map[string]interface{}{"bid": int64(1), "delta": int64(-3348)},
 		},
 		{
 			Query:  "CREATE (:History { tid: $tid, bid: $bid, aid: $aid, delta: $delta, mtime: timestamp() })",
-			Params: params,
+			Params: map[string]interface{}{"aid": int64(90704), "bid": int64(1), "delta": int64(-3348), "tid": int64(1)},
 		},
 	}, uow.Statements)
 }

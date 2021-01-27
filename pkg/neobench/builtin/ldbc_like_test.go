@@ -20,7 +20,6 @@ func TestParseIC2(t *testing.T) {
 	if err != nil {
 		return
 	}
-	params := map[string]interface{}{"personId": int64(6023), "scale": int64(1)}
 	assert.Equal(t, []neobench.Statement{
 		{
 			Query: `MATCH (:Person {id:$personId})-[:KNOWS]-(friend),
@@ -35,7 +34,7 @@ RETURN friend.id AS personId,
 ORDER BY messageDate DESC, messageId ASC
 LIMIT 20
 `,
-			Params: params,
+			Params: map[string]interface{}{"personId": int64(6023)},
 		},
 	}, uow.Statements)
 }

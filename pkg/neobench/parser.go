@@ -12,14 +12,7 @@ import (
 )
 
 func Parse(filename, script string, weight float64) (Script, error) {
-	var s scanner.Scanner
-	s.Init(strings.NewReader(script))
-	s.Filename = filename
-	s.Whitespace ^= 1 << '\n' // don't skip newlines
-
-	c := &context{
-		s: s,
-	}
+	c := newParseContext(script, filename)
 
 	commands := make([]Command, 0)
 
@@ -100,17 +93,71 @@ func command(c *context) Command {
 	for tok, content := c.Next(); tok != ';' && tok != scanner.EOF; tok, content = c.Next() {
 		b.WriteString(content)
 	}
+	query := b.String()
 	return QueryCommand{
-		Query: b.String(),
+		Query:  query,
+		Params: parseParams(query, c.s.Filename),
 	}
 }
 
-func ident(c *context) string {
-	tok, content := c.Next()
-	if tok != scanner.Ident {
-		c.fail(fmt.Errorf("expected identifier, got '%s'", scanner.TokenString(tok)))
+// Extract a list of parameters used in a given query string
+func parseParams(query, filename string) []string {
+	params := make(map[string]bool)
+	c := newParseContext(query, filename)
+	for !c.done {
+		tok := c.Peek()
+		if tok == scanner.EOF {
+			break
+		} else if tok == '$' {
+			c.Next()
+			if name, err := tryIdent(c); err == nil {
+				params[name] = true
+			}
+		} else if tok == '{' {
+			// '{' is ambiguous; we specifically want the pattern ['{', IDENT, '}']
+			c.Next()
+			name, err := tryIdent(c)
+			if err != nil {
+				// Not followed by Ident, whatever it is it doesn't look like a param
+				continue
+			}
+			if c.Peek() != '}' {
+				// "{ IDENT", but the next token isn't }
+				continue
+			}
+			params[name] = true
+		}
+		c.Next()
 	}
-	return content
+
+	out := make([]string, 0, len(params))
+	for k := range params {
+		out = append(out, k)
+	}
+	return out
+}
+
+func ident(c *context) string {
+	name, err := tryIdent(c)
+	if err != nil {
+		c.fail(err)
+	}
+	return name
+}
+
+// Try to parse an identifier; if you can't, return an error, don't put context in failure mode
+func tryIdent(c *context) (string, error) {
+	tok := c.Peek()
+	if tok == scanner.RawString {
+		// backtick-quoted identifier
+		_, content := c.Next()
+		return content[1 : len(content)-1], nil
+	}
+	if tok == scanner.Ident {
+		_, content := c.Next()
+		return content, nil
+	}
+	return "", fmt.Errorf("expected identifier, got '%s'", scanner.TokenString(tok))
 }
 
 func expr(c *context) Expression {
@@ -811,6 +858,17 @@ type context struct {
 	peekText string
 	done     bool
 	err      error
+}
+
+func newParseContext(in, name string) *context {
+	var s scanner.Scanner
+	s.Init(strings.NewReader(in))
+	s.Filename = name
+	s.Whitespace ^= 1 << '\n' // don't skip newlines
+
+	return &context{
+		s: s,
+	}
 }
 
 func (t *context) Peek() rune {

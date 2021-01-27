@@ -25,7 +25,7 @@ RETURN 1;`, 1)
 	assert.Equal(t, []Statement{
 		{
 			Query:  "RETURN 1",
-			Params: map[string]interface{}{"sleeptime": int64(13), "scale": int64(1)},
+			Params: map[string]interface{}{},
 		},
 	}, uow.Statements)
 }
@@ -144,7 +144,7 @@ func TestExpressions(t *testing.T) {
 		t.Run(expr, func(t *testing.T) {
 			vars := map[string]interface{}{"scale": int64(1)}
 			script, err := Parse(fmt.Sprintf("expr:'%s'", expr), fmt.Sprintf(`\set v %s
-RETURN 1;`, expr), 1)
+RETURN {v};`, expr), 1)
 
 			assert.NoError(t, err)
 			if err != nil {
@@ -167,7 +167,7 @@ RETURN 1;`, expr), 1)
 
 func TestDebugFunction(t *testing.T) {
 	vars := map[string]interface{}{"scale": int64(1)}
-	script, err := Parse("test:debug(..)", "\\set blah debug(1337) * 10\nRETURN 1;", 1)
+	script, err := Parse("test:debug(..)", "\\set blah debug(1337) * 10\nRETURN { blah };", 1)
 
 	assert.NoError(t, err)
 	if err != nil {
@@ -192,7 +192,7 @@ func TestComment(t *testing.T) {
 \set sleeptime 13 // this is a comment at end-of-line in a metacommand
 
 // This is a comment on a query
-RETURN 1;`, 1)
+RETURN {sleeptime};`, 1)
 
 	assert.NoError(t, err)
 	uow, err := script.Eval(ScriptContext{
@@ -202,8 +202,34 @@ RETURN 1;`, 1)
 	assert.NoError(t, err)
 	assert.Equal(t, []Statement{
 		{
-			Query:  "RETURN 1",
-			Params: map[string]interface{}{"sleeptime": int64(13), "scale": int64(1)},
+			Query:  "RETURN {sleeptime}",
+			Params: map[string]interface{}{"sleeptime": int64(13)},
+		},
+	}, uow.Statements)
+}
+
+// This allows script authors to bring large datasets into scope, like to randomly pick a value
+// from a big set, but then not have that big set be sent off to the database.
+func TestExcludesUnusedParams(t *testing.T) {
+	vars := map[string]interface{}{"scale": int64(1)}
+	script, err := Parse("sleep", `
+\set notSent 13
+\set sent $notSent + 10
+\set alsoSent $notSent + 1
+\set quotedSent $notSent + 2
+
+RETURN {sent} + $alsoSent`+" + {`quotedSent`};", 1)
+
+	assert.NoError(t, err)
+	uow, err := script.Eval(ScriptContext{
+		Vars: vars,
+		Rand: rand.New(rand.NewSource(1337)),
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, []Statement{
+		{
+			Query:  "RETURN {sent} + $alsoSent + {`quotedSent`}",
+			Params: map[string]interface{}{"sent": int64(23), "alsoSent": int64(14), "quotedSent": int64(15)},
 		},
 	}, uow.Statements)
 }
