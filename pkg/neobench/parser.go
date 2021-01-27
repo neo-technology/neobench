@@ -266,7 +266,8 @@ func factor(c *context) Expression {
 			return Expression{}
 		}
 		return Expression{Kind: floatExpr, Payload: floatVal}
-
+	} else if tok == scanner.String {
+		return Expression{Kind: stringExpr, Payload: content[1 : len(content)-1]}
 	} else if tok == '(' {
 		innerExp := expr(c)
 		expect(c, ')')
@@ -330,12 +331,14 @@ const (
 	intExpr ExprKind = 1
 	// payload float64
 	floatExpr ExprKind = 2
+	// payload string
+	stringExpr ExprKind = 3
 	// payload []Expression
-	listExpr ExprKind = 3
+	listExpr ExprKind = 4
 	// payload []CallExpr
-	callExpr ExprKind = 4
+	callExpr ExprKind = 5
 	// payload string (varname)
-	varExpr ExprKind = 5
+	varExpr ExprKind = 6
 )
 
 func (e ExprKind) String() string {
@@ -343,12 +346,13 @@ func (e ExprKind) String() string {
 }
 
 var exprKindNames = []string{
-	nullExpr:  "N/A",
-	intExpr:   "int",
-	floatExpr: "double",
-	listExpr:  "list",
-	callExpr:  "call",
-	varExpr:   "var",
+	nullExpr:   "N/A",
+	intExpr:    "int",
+	floatExpr:  "double",
+	stringExpr: "string",
+	listExpr:   "list",
+	callExpr:   "call",
+	varExpr:    "var",
 }
 
 type Expression struct {
@@ -358,7 +362,7 @@ type Expression struct {
 
 func (e Expression) Eval(ctx *ScriptContext) (interface{}, error) {
 	switch e.Kind {
-	case intExpr, floatExpr:
+	case intExpr, floatExpr, stringExpr:
 		return e.Payload, nil
 	case listExpr:
 		innerExprs := e.Payload.([]Expression)
@@ -390,6 +394,8 @@ func (e Expression) String() string {
 		return fmt.Sprintf("%d", e.Payload)
 	case floatExpr:
 		return fmt.Sprintf("%f", e.Payload)
+	case stringExpr:
+		return fmt.Sprintf("\"%s\"", e.Payload)
 	case listExpr:
 		return fmt.Sprintf("%v", e.Payload)
 	case callExpr:

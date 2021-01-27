@@ -81,9 +81,11 @@ func TestExpressions(t *testing.T) {
 		"1":           int64(1),
 		"9999999000":  int64(9999999000),
 		"-9999999000": int64(-9999999000),
+		"\"Hello\"":   "Hello",
 
 		// Composites
-		"[1, 2, [3]]": []interface{}{int64(1), int64(2), []interface{}{int64(3)}},
+		"[1, 2, [3]]":    []interface{}{int64(1), int64(2), []interface{}{int64(3)}},
+		"[\"a\", \"b\"]": []interface{}{"a", "b"},
 
 		// Single-operator arithmetic
 		"1 * 2":     int64(2),
