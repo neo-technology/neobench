@@ -133,6 +133,8 @@ func TestExpressions(t *testing.T) {
 		"least(5, 4, 3, 2)":              int64(2),
 		"least(5, 4, 3, 2.0, 8)":         2.0,
 		"least(-5, -4, -3, -2)":          int64(-5),
+		"len([1,2,3])":                   int64(3),
+		"len([])":                        int64(0),
 		"int(5.4 + 3.8)":                 int64(9),
 		"int(5 + 4)":                     int64(9),
 		"pi()":                           math.Pi,

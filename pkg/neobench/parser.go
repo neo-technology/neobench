@@ -547,6 +547,20 @@ func (f CallExpr) Eval(ctx *ScriptContext) (interface{}, error) {
 			}
 			return a.iVal, nil
 		}
+	// TODO: Align with name cypher uses
+	case "len":
+		if len(f.args) == 0 {
+			return nil, fmt.Errorf("len(..) requires an argument")
+		}
+		rawSrc, err := f.args[0].Eval(ctx)
+		if err != nil {
+			return nil, errors.Wrapf(err, "in %s", f.String())
+		}
+		src, ok := rawSrc.([]interface{})
+		if !ok {
+			return nil, fmt.Errorf("argument to len(..) needs to be a list, in %s", f.String())
+		}
+		return int64(len(src)), nil
 	case "double":
 		a, err := f.argAsNumber(0, ctx)
 		if err != nil {
