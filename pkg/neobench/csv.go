@@ -9,20 +9,50 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Caching concurrency-safe mechanism for loading CSV data into scripts
 type CsvLoader struct {
+	m sync.RWMutex
+
+	cache map[string][]interface{}
+
 	open func(name string) (io.ReadCloser, error)
 }
 
 func NewCsvLoader() *CsvLoader {
 	return &CsvLoader{
-		open: func(name string) (io.ReadCloser, error) { return os.Open(name) },
+		cache: make(map[string][]interface{}),
+		open:  func(name string) (io.ReadCloser, error) { return os.Open(name) },
 	}
 }
 
+func (l *CsvLoader) getCached(name string) ([]interface{}, bool) {
+	l.m.RLock()
+	defer l.m.RUnlock()
+
+	entry, found := l.cache[name]
+	return entry, found
+}
+
 func (l *CsvLoader) Load(name string) ([]interface{}, error) {
+	if cached, found := l.getCached(name); found {
+		return cached, nil
+	}
+
+	// Not found; we've now dropped the read lock; get a write lock, check nobody else
+	// did the deed in the interim and otherwise load
+	l.m.Lock()
+	defer l.m.Unlock()
+
+	// Someone else may have had time, while we dropped the lock, to do the load
+	cached, found := l.cache[name]
+	if found {
+		return cached, nil
+	}
+
+	// No, do the load
 	f, err := l.open(name)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to read csv '%s'", name)
@@ -50,6 +80,8 @@ func (l *CsvLoader) Load(name string) ([]interface{}, error) {
 		out = append(out, row)
 	}
 
+	l.cache[name] = out
+
 	return out, nil
 }
 
@@ -67,6 +99,7 @@ func csvParseCell(raw string) interface{} {
 
 func fakeCsvLoader(files map[string]string) *CsvLoader {
 	l := &CsvLoader{
+		cache: make(map[string][]interface{}),
 		open: func(name string) (io.ReadCloser, error) {
 			content, found := files[name]
 			if !found {

@@ -31,6 +31,7 @@ main() {
   test_custom_script
   test_mixed_scripts
   test_named_database
+  test_csv_parameter
 }
 
 test_tpcb_like() {
@@ -67,6 +68,15 @@ test_custom_script() {
 
   "${NEOBENCH_PATH}" -p secret -w "${SCRIPTPATH}/write.script" -d 5s --define myvar=12
   "${NEOBENCH_PATH}" -p secret -w "${SCRIPTPATH}/write.script" -d 5s --define myvar=12 --latency
+}
+
+
+test_csv_parameter() {
+  setup_db
+
+  "${NEOBENCH_PATH}" -p secret -w  <(echo "
+\\set data csv(\"${SCRIPTPATH}/data.csv\")
+RETURN {data}") -d 1s
 }
 
 test_mixed_scripts() {
