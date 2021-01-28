@@ -100,6 +100,7 @@ func (w *WeightedRandom) Draw(r *rand.Rand) interface{} {
 }
 
 type Script struct {
+	// Either path to script provided by user, or builtin:<name>
 	Name     string
 	Readonly bool
 	Weight   float64
@@ -109,6 +110,7 @@ type Script struct {
 // Context that scripts are executed in; these are not thread safe, and are re-created on each script
 // invocation, so need to be kept lightish.
 type ScriptContext struct {
+	Script    Script
 	Stderr    io.Writer
 	Vars      map[string]interface{}
 	Rand      *rand.Rand
@@ -155,6 +157,7 @@ type ClientWorkload struct {
 func (s *ClientWorkload) Next(workerId int64) (UnitOfWork, error) {
 	script := s.Scripts.Choose(s.Rand)
 	return script.Eval(ScriptContext{
+		Script:    script,
 		Stderr:    s.Stderr,
 		Vars:      createVars(s.Variables, workerId),
 		Rand:      s.Rand,
@@ -163,6 +166,7 @@ func (s *ClientWorkload) Next(workerId int64) (UnitOfWork, error) {
 }
 
 type UnitOfWork struct {
+	// Path to user-provided script, or builtin:<name>
 	ScriptName string
 	Readonly   bool
 	Statements []Statement
@@ -240,6 +244,7 @@ func WorkloadPreflight(driver neo4j.Driver, dbName string, script Script, vars m
 	r := rand.New(rand.NewSource(1337))
 
 	unitOfWork, err := script.Eval(ScriptContext{
+		Script:    script,
 		Stderr:    os.Stderr,
 		Vars:      createVars(vars, 0),
 		Rand:      r,
@@ -251,7 +256,6 @@ func WorkloadPreflight(driver neo4j.Driver, dbName string, script Script, vars m
 	readonlyRaw, err := session.ReadTransaction(func(tx neo4j.Transaction) (interface{}, error) {
 		readonly := true
 		for _, stmt := range unitOfWork.Statements {
-			fmt.Printf("RUNNING: '%s'\n", stmt)
 			res, err := tx.Run(fmt.Sprintf("EXPLAIN %s", stmt.Query), stmt.Params)
 			if err != nil {
 				return false, err

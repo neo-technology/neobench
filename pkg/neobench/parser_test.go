@@ -157,7 +157,7 @@ func TestExpressions(t *testing.T) {
 		"random_matrix(2, [1,5], [5,8])": []interface{}{
 			[]interface{}{int64(3), int64(5)},
 			[]interface{}{int64(1), int64(5)}},
-		"csv(\"data.csv\")": []interface{}{
+		"csv(\"/data.csv\")": []interface{}{
 			[]interface{}{"row1", int64(1), 1.3},
 			[]interface{}{"row2", int64(2), 1.0}},
 	}
@@ -177,7 +177,7 @@ RETURN {v};`, expr), 1)
 				Vars: vars,
 				Rand: rand.New(rand.NewSource(1337)),
 				CsvLoader: fakeCsvLoader(map[string]string{
-					"data.csv": `row1, 1, 1.3
+					"/data.csv": `row1, 1, 1.3
 "row2", 2, 1.0`,
 				}),
 			})

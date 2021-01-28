@@ -5,6 +5,7 @@ import (
 	"github.com/pkg/errors"
 	"math"
 	"math/rand"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"text/scanner"
@@ -561,6 +562,7 @@ func (s ListCompExpr) Eval(ctx *ScriptContext) (interface{}, error) {
 
 	out := make([]interface{}, len(src))
 	innerCtx := ScriptContext{
+		Script:    ctx.Script,
 		Stderr:    ctx.Stderr,
 		Vars:      make(map[string]interface{}),
 		Rand:      ctx.Rand,
@@ -864,7 +866,11 @@ func (f CallExpr) Eval(ctx *ScriptContext) (interface{}, error) {
 		if err != nil {
 			return nil, errors.Wrap(err, "csv(..) takes string as argument")
 		}
-		return ctx.CsvLoader.Load(path)
+		absPath, err := absPath(ctx.Script.Name, path)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed resolving path %s relative to %s in %s", path, ctx.Script.Name, f.String())
+		}
+		return ctx.CsvLoader.Load(absPath)
 	case "*":
 		a, err := f.argAsNumber(0, ctx)
 		if err != nil {
@@ -1148,16 +1154,18 @@ func (t *parseContext) fail(err error) {
 	t.err = fmt.Errorf("%s (at %s)", err, t.s.Pos().String())
 }
 
-func max(a, b int64) int64 {
-	if a > b {
-		return a
+func absPath(scriptName, path string) (string, error) {
+	if strings.HasPrefix(scriptName, "builtin:") {
+		// builtin script.. should not be referring to any file system things
+		panic(fmt.Sprintf("%s should not be accessing: %s", scriptName, path))
 	}
-	return b
-}
+	if filepath.IsAbs(path) {
+		return path, nil
+	}
 
-func min(a, b int64) int64 {
-	if a < b {
-		return a
-	}
-	return b
+	scriptDir := filepath.Dir(scriptName)
+
+	// We normalize the paths so that separate scripts referring to the same csv file hit the same cache slot
+	// in CsvLoader.
+	return filepath.Abs(filepath.Join(scriptDir, path))
 }
