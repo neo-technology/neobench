@@ -76,7 +76,7 @@ test_csv_parameter() {
 
   "${NEOBENCH_PATH}" -p secret -w  <(echo "
 \\set data csv(\"${SCRIPTPATH}/data.csv\")
-RETURN {data}") -d 1s
+RETURN $data") -d 1s
 }
 
 test_mixed_scripts() {
