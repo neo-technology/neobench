@@ -86,6 +86,14 @@ func TestExpressions(t *testing.T) {
 		// Composites
 		"[1, 2, [3]]":    []interface{}{int64(1), int64(2), []interface{}{int64(3)}},
 		"[\"a\", \"b\"]": []interface{}{"a", "b"},
+		"{}":             map[string]interface{}{},
+		"{ key: 1 }": map[string]interface{}{
+			"key": int64(1),
+		},
+		"{ key: 1, nest: [ 1 ] }": map[string]interface{}{
+			"key":  int64(1),
+			"nest": []interface{}{int64(1)},
+		},
 
 		// Single-operator arithmetic
 		"1 * 2":     int64(2),

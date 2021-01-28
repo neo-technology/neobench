@@ -333,6 +333,24 @@ func factor(c *parseContext) Expression {
 		}
 		c.Next()
 		return Expression{Kind: listExpr, Payload: list}
+	} else if tok == '{' {
+		out := make(map[string]Expression)
+
+		tok := c.PeekToken()
+		for tok != '}' {
+			if len(out) > 0 {
+				expect(c, ',')
+			}
+			key := ident(c)
+			expect(c, ':')
+			value := expr(c)
+			out[key] = value
+			if c.done {
+				return Expression{}
+			}
+			tok = c.PeekToken()
+		}
+		return Expression{Kind: mapExpr, Payload: out}
 	} else {
 		c.fail(fmt.Errorf("unexpected token, expected Expression: %s", scanner.TokenString(tok)))
 		return Expression{}
@@ -377,16 +395,18 @@ const (
 	floatExpr ExprKind = 2
 	// payload string
 	stringExpr ExprKind = 3
+	// payload map[string]Expression
+	mapExpr ExprKind = 4
 	// payload []Expression
-	listExpr ExprKind = 4
+	listExpr ExprKind = 5
 	// payload ListCompExpr
-	listCompExpr ExprKind = 5
+	listCompExpr ExprKind = 6
 	// payload CallExpr
-	sliceExpr ExprKind = 6
+	sliceExpr ExprKind = 7
 	// payload CallExpr
-	callExpr ExprKind = 7
+	callExpr ExprKind = 8
 	// payload string (varname)
-	varExpr ExprKind = 8
+	varExpr ExprKind = 9
 )
 
 func (e ExprKind) String() string {
@@ -398,6 +418,7 @@ var exprKindNames = []string{
 	intExpr:      "int",
 	floatExpr:    "double",
 	stringExpr:   "string",
+	mapExpr:      "map",
 	listExpr:     "list",
 	listCompExpr: "listcomp",
 	sliceExpr:    "slice",
@@ -425,6 +446,17 @@ func (e Expression) Eval(ctx *ScriptContext) (interface{}, error) {
 			out = append(out, exprResult)
 		}
 		return out, nil
+	case mapExpr:
+		innerExprs := e.Payload.(map[string]Expression)
+		out := make(map[string]interface{})
+		for k, innerExpr := range innerExprs {
+			exprResult, err := innerExpr.Eval(ctx)
+			if err != nil {
+				return nil, errors.Wrapf(err, "error when evaluating %s", e)
+			}
+			out[k] = exprResult
+		}
+		return out, nil
 	case listCompExpr:
 		return e.Payload.(ListCompExpr).Eval(ctx)
 	case sliceExpr:
@@ -450,7 +482,7 @@ func (e Expression) String() string {
 		return fmt.Sprintf("%f", e.Payload)
 	case stringExpr:
 		return fmt.Sprintf("\"%s\"", e.Payload)
-	case listExpr:
+	case mapExpr, listExpr:
 		return fmt.Sprintf("%v", e.Payload)
 	case sliceExpr:
 		return e.Payload.(SliceExpr).String()
