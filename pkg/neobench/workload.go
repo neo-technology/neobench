@@ -251,6 +251,7 @@ func WorkloadPreflight(driver neo4j.Driver, dbName string, script Script, vars m
 	readonlyRaw, err := session.ReadTransaction(func(tx neo4j.Transaction) (interface{}, error) {
 		readonly := true
 		for _, stmt := range unitOfWork.Statements {
+			fmt.Printf("RUNNING: '%s'\n", stmt)
 			res, err := tx.Run(fmt.Sprintf("EXPLAIN %s", stmt.Query), stmt.Params)
 			if err != nil {
 				return false, err

@@ -350,6 +350,7 @@ func factor(c *parseContext) Expression {
 			}
 			tok = c.PeekToken()
 		}
+		c.Next()
 		return Expression{Kind: mapExpr, Payload: out}
 	} else {
 		c.fail(fmt.Errorf("unexpected token, expected Expression: %s", scanner.TokenString(tok)))
@@ -368,6 +369,7 @@ func listComprehension(c *parseContext) Expression {
 	srcExpr := expr(c)
 	expect(c, '|')
 	outExpr := expr(c)
+	expect(c, ']')
 	return Expression{
 		Kind: listCompExpr,
 		Payload: ListCompExpr{

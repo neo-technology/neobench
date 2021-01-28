@@ -165,7 +165,7 @@ func TestExpressions(t *testing.T) {
 	for expr, expected := range tc {
 		expr, expected := expr, expected
 		t.Run(expr, func(t *testing.T) {
-			vars := map[string]interface{}{"scale": int64(1)}
+			vars := map[string]interface{}{"scale": int64(1), "somelist": []interface{}{int64(1), int64(2)}}
 			script, err := Parse(fmt.Sprintf("expr:'%s'", expr), fmt.Sprintf(`\set v %s
 RETURN {v};`, expr), 1)
 
@@ -257,6 +257,34 @@ RETURN {sent} + $alsoSent`+" + {`quotedSent`};", 1)
 		{
 			Query:  "RETURN {sent} + $alsoSent + {`quotedSent`}",
 			Params: map[string]interface{}{"sent": int64(23), "alsoSent": int64(14), "quotedSent": int64(15)},
+		},
+	}, uow.Statements)
+}
+
+// Partially a regression test for a parser bug in list comprehensions, but covers multi-statement scripts
+func TestMultiQuery(t *testing.T) {
+	vars := map[string]interface{}{"scale": int64(1), "ids": []interface{}{1}}
+	script, err := Parse("sleep", `
+\set comp [ i in range(1, 10) | {i: $i, id: $ids[random(0, len($ids))]} ]
+\set date "2021-01-27"
+
+MATCH (a);
+MATCH (b);`, 1)
+
+	assert.NoError(t, err)
+	uow, err := script.Eval(ScriptContext{
+		Vars: vars,
+		Rand: rand.New(rand.NewSource(1337)),
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, []Statement{
+		{
+			Query:  "MATCH (a)",
+			Params: map[string]interface{}{},
+		},
+		{
+			Query:  "MATCH (b)",
+			Params: map[string]interface{}{},
 		},
 	}, uow.Statements)
 }
