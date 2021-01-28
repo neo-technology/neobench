@@ -17,7 +17,7 @@ func Parse(filename, script string, weight float64) (Script, error) {
 	commands := make([]Command, 0)
 
 	for !c.done {
-		tok := c.Peek()
+		tok := c.PeekToken()
 		if tok == scanner.EOF {
 			break
 		} else if tok == '\\' {
@@ -41,7 +41,7 @@ func Parse(filename, script string, weight float64) (Script, error) {
 	}, nil
 }
 
-func metaCommand(c *context) Command {
+func metaCommand(c *parseContext) Command {
 	expect(c, '\\')
 	cmd := ident(c)
 
@@ -56,7 +56,7 @@ func metaCommand(c *context) Command {
 	case "sleep":
 		durationBase := expr(c)
 		unit := time.Second
-		switch c.Peek() {
+		switch c.PeekToken() {
 		case '\n', scanner.EOF:
 			break
 		default:
@@ -69,7 +69,7 @@ func metaCommand(c *context) Command {
 			case "us":
 				unit = time.Microsecond
 			default:
-				c.fail(fmt.Errorf("\\sleep command must use 'us', 'ms', or 's' unit argument - or none. got: %s", c.peekText))
+				c.fail(fmt.Errorf("\\sleep command must use 'us', 'ms', or 's' unit argument - or none. got: %s", unitStr))
 				return nil
 			}
 		}
@@ -83,7 +83,7 @@ func metaCommand(c *context) Command {
 	}
 }
 
-func command(c *context) Command {
+func command(c *parseContext) Command {
 	originalWhitespace := c.s.Whitespace
 	defer func() {
 		c.s.Whitespace = originalWhitespace
@@ -105,7 +105,7 @@ func parseParams(query, filename string) []string {
 	params := make(map[string]bool)
 	c := newParseContext(query, filename)
 	for !c.done {
-		tok := c.Peek()
+		tok := c.PeekToken()
 		if tok == scanner.EOF {
 			break
 		} else if tok == '$' {
@@ -121,7 +121,7 @@ func parseParams(query, filename string) []string {
 				// Not followed by Ident, whatever it is it doesn't look like a param
 				continue
 			}
-			if c.Peek() != '}' {
+			if c.PeekToken() != '}' {
 				// "{ IDENT", but the next token isn't }
 				continue
 			}
@@ -137,7 +137,7 @@ func parseParams(query, filename string) []string {
 	return out
 }
 
-func ident(c *context) string {
+func ident(c *parseContext) string {
 	name, err := tryIdent(c)
 	if err != nil {
 		c.fail(err)
@@ -146,8 +146,8 @@ func ident(c *context) string {
 }
 
 // Try to parse an identifier; if you can't, return an error, don't put context in failure mode
-func tryIdent(c *context) (string, error) {
-	tok := c.Peek()
+func tryIdent(c *parseContext) (string, error) {
+	tok := c.PeekToken()
 	if tok == scanner.RawString {
 		// backtick-quoted identifier
 		_, content := c.Next()
@@ -160,10 +160,10 @@ func tryIdent(c *context) (string, error) {
 	return "", fmt.Errorf("expected identifier, got '%s'", scanner.TokenString(tok))
 }
 
-func expr(c *context) Expression {
+func expr(c *parseContext) Expression {
 	lhs := term(c)
 	for {
-		tok := c.Peek()
+		tok := c.PeekToken()
 		if tok == '+' {
 			c.Next()
 			rhs := term(c)
@@ -190,10 +190,10 @@ func expr(c *context) Expression {
 	}
 }
 
-func term(c *context) Expression {
+func term(c *parseContext) Expression {
 	lhs := factor(c)
 	for {
-		tok := c.Peek()
+		tok := c.PeekToken()
 		if tok == '*' {
 			c.Next()
 			rhs := factor(c)
@@ -241,13 +241,13 @@ func term(c *context) Expression {
 	}
 }
 
-func factor(c *context) Expression {
+func factor(c *parseContext) Expression {
 	tok, content := c.Next()
 	if tok == scanner.Ident {
 		funcName := content
 		var args []Expression
 		expect(c, '(')
-		tok := c.Peek()
+		tok := c.PeekToken()
 		for tok != ')' {
 			if len(args) > 0 {
 				expect(c, ',')
@@ -256,7 +256,7 @@ func factor(c *context) Expression {
 			if c.done {
 				return Expression{}
 			}
-			tok = c.Peek()
+			tok = c.PeekToken()
 		}
 		c.Next()
 		return Expression{Kind: callExpr, Payload: CallExpr{
@@ -307,8 +307,20 @@ func factor(c *context) Expression {
 		varName := ident(c)
 		return Expression{Kind: varExpr, Payload: varName}
 	} else if tok == '[' {
+		// To tell the difference between lists and comprehensions, we need to look ahead 2 tokens; we
+		// do that by stepping forward and then pushing stuff back
+		peek1, peek1Text := c.Next()
+		peek2, peek2Text := c.Peek()
+		c.Push(peek1, peek1Text) // Undo the Next() call
+
+		// Pattern for list comprehensions
+		if peek1 == scanner.Ident && peek2 == scanner.Ident && strings.ToLower(peek2Text) == "in" {
+			return listComprehension(c)
+		}
+
+		// No, parse literal list
+		tok := peek1
 		list := make([]Expression, 0)
-		tok := c.Peek()
 		for tok != ']' {
 			if len(list) > 0 {
 				expect(c, ',')
@@ -317,7 +329,7 @@ func factor(c *context) Expression {
 			if c.done {
 				return Expression{}
 			}
-			tok = c.Peek()
+			tok = c.PeekToken()
 		}
 		c.Next()
 		return Expression{Kind: listExpr, Payload: list}
@@ -327,7 +339,28 @@ func factor(c *context) Expression {
 	}
 }
 
-func expect(c *context, expected rune) {
+func listComprehension(c *parseContext) Expression {
+	itemName := ident(c)
+	maybeIn := ident(c)
+	if strings.ToLower(maybeIn) != "in" {
+		c.fail(fmt.Errorf("don't know what '[ %s %s ..' means, did you mean to add a comma after '%s'",
+			itemName, maybeIn, itemName))
+		return Expression{}
+	}
+	srcExpr := expr(c)
+	expect(c, '|')
+	outExpr := expr(c)
+	return Expression{
+		Kind: listCompExpr,
+		Payload: ListCompExpr{
+			itemName: itemName,
+			src:      srcExpr,
+			out:      outExpr,
+		},
+	}
+}
+
+func expect(c *parseContext, expected rune) {
 	tok, _ := c.Next()
 	if tok != expected {
 		c.fail(fmt.Errorf("expected '%s', got '%s'", scanner.TokenString(expected), scanner.TokenString(tok)))
@@ -346,12 +379,14 @@ const (
 	stringExpr ExprKind = 3
 	// payload []Expression
 	listExpr ExprKind = 4
+	// payload ListCompExpr
+	listCompExpr ExprKind = 5
 	// payload CallExpr
-	sliceExpr ExprKind = 5
+	sliceExpr ExprKind = 6
 	// payload CallExpr
-	callExpr ExprKind = 6
+	callExpr ExprKind = 7
 	// payload string (varname)
-	varExpr ExprKind = 7
+	varExpr ExprKind = 8
 )
 
 func (e ExprKind) String() string {
@@ -359,14 +394,15 @@ func (e ExprKind) String() string {
 }
 
 var exprKindNames = []string{
-	nullExpr:   "N/A",
-	intExpr:    "int",
-	floatExpr:  "double",
-	stringExpr: "string",
-	listExpr:   "list",
-	sliceExpr:  "slice",
-	callExpr:   "call",
-	varExpr:    "var",
+	nullExpr:     "N/A",
+	intExpr:      "int",
+	floatExpr:    "double",
+	stringExpr:   "string",
+	listExpr:     "list",
+	listCompExpr: "listcomp",
+	sliceExpr:    "slice",
+	callExpr:     "call",
+	varExpr:      "var",
 }
 
 type Expression struct {
@@ -389,9 +425,10 @@ func (e Expression) Eval(ctx *ScriptContext) (interface{}, error) {
 			out = append(out, exprResult)
 		}
 		return out, nil
+	case listCompExpr:
+		return e.Payload.(ListCompExpr).Eval(ctx)
 	case sliceExpr:
-		slice := e.Payload.(SliceExpr)
-		return slice.Eval(ctx)
+		return e.Payload.(SliceExpr).Eval(ctx)
 	case varExpr:
 		value, found := ctx.Vars[e.Payload.(string)]
 		if !found {
@@ -417,6 +454,8 @@ func (e Expression) String() string {
 		return fmt.Sprintf("%v", e.Payload)
 	case sliceExpr:
 		return e.Payload.(SliceExpr).String()
+	case listCompExpr:
+		return e.Payload.(ListCompExpr).String()
 	case callExpr:
 		return e.Payload.(CallExpr).String()
 	case varExpr:
@@ -461,6 +500,49 @@ func (s SliceExpr) Eval(ctx *ScriptContext) (interface{}, error) {
 	i := iNum.iVal
 
 	return src[i], nil
+}
+
+// [i in range(1,10) | i * 2]
+type ListCompExpr struct {
+	itemName string
+	// Expression that yields a list
+	src Expression
+	// Evaluated once for each item in src, with item named itemName
+	out Expression
+}
+
+func (s ListCompExpr) String() string {
+	return fmt.Sprintf("[%s in %s | %s]", s.itemName, s.src.String(), s.out.String())
+}
+
+func (s ListCompExpr) Eval(ctx *ScriptContext) (interface{}, error) {
+	srcRaw, err := s.src.Eval(ctx)
+	if err != nil {
+		return nil, err
+	}
+	src, ok := srcRaw.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("source in list comprehension must be a list, got %v from %s", src, s.src)
+	}
+
+	out := make([]interface{}, len(src))
+	innerCtx := ScriptContext{
+		Stderr:    ctx.Stderr,
+		Vars:      make(map[string]interface{}),
+		Rand:      ctx.Rand,
+		CsvLoader: ctx.CsvLoader,
+	}
+	for k, v := range ctx.Vars {
+		innerCtx.Vars[k] = v
+	}
+	for i := range src {
+		innerCtx.Vars[s.itemName] = src[i]
+		out[i], err = s.out.Eval(&innerCtx)
+		if err != nil {
+			return nil, errors.Wrapf(err, "when evaluating %s=%v in %s", s.itemName, src[i], s.String())
+		}
+	}
+	return out, nil
 }
 
 type CallExpr struct {
@@ -955,43 +1037,67 @@ func asNumber(raw interface{}) (Number, error) {
 	}
 }
 
-type context struct {
-	s scanner.Scanner
-	// Next token returned by scanner, or 0
-	peek     rune
-	peekText string
-	done     bool
-	err      error
+type parseToken struct {
+	token rune
+	text  string
 }
 
-func newParseContext(in, name string) *context {
+type parseContext struct {
+	s scanner.Scanner
+	// The stack is used for peeking and backtracking;
+	// it only comes into play if you call Peek or manually manipulate it.
+	// When calling Next(), it first checks (and pops) the stack before it goes
+	// to the scanner, `s`.
+	stack []parseToken
+	done  bool
+	err   error
+}
+
+func newParseContext(in, name string) *parseContext {
 	var s scanner.Scanner
 	s.Init(strings.NewReader(in))
 	s.Filename = name
 	s.Whitespace ^= 1 << '\n' // don't skip newlines
 
-	return &context{
+	return &parseContext{
 		s: s,
 	}
 }
 
-func (t *context) Peek() rune {
-	if t.peek == 0 {
-		t.peek = t.s.Scan()
-		t.peekText = t.s.TokenText()
+func (t *parseContext) Peek() (rune, string) {
+	if len(t.stack) == 0 {
+		token := t.s.Scan()
+		text := t.s.TokenText()
+		t.stack = append(t.stack, parseToken{
+			token: token,
+			text:  text,
+		})
 	}
-	return t.peek
+	token := t.stack[len(t.stack)-1]
+	return token.token, token.text
 }
 
-func (t *context) Next() (rune, string) {
-	if t.peek != 0 {
-		next := t.peek
-		nextStr := t.peekText
-		t.peek = 0
-		if next == scanner.EOF {
+func (t *parseContext) PeekToken() rune {
+	token, _ := t.Peek()
+	return token
+}
+
+// Backtrack, push the given pair onto the stack, effectively stepping backwards
+func (t *parseContext) Push(token rune, text string) {
+	t.stack = append(t.stack, parseToken{
+		token: token,
+		text:  text,
+	})
+}
+
+func (t *parseContext) Next() (rune, string) {
+	if len(t.stack) != 0 {
+		next := t.stack[len(t.stack)-1]
+		t.stack = t.stack[:len(t.stack)-1]
+		if next.token == scanner.EOF {
 			t.done = true
 		}
-		return next, nextStr
+		return next.token, next.text
 	}
 	next := t.s.Scan()
 	if next == scanner.EOF {
@@ -1000,7 +1106,7 @@ func (t *context) Next() (rune, string) {
 	return next, t.s.TokenText()
 }
 
-func (t *context) fail(err error) {
+func (t *parseContext) fail(err error) {
 	t.done = true
 	if t.err != nil {
 		return

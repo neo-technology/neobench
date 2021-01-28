@@ -122,6 +122,9 @@ func TestExpressions(t *testing.T) {
 		"[1,2][1]":             int64(2),
 		"range(1, 5)[abs(-1)]": int64(2),
 
+		// List comprehension
+		"[ i in range(1,3) | $i ]": []interface{}{int64(1), int64(2), int64(3)},
+
 		// Functions
 		"abs(-17)":                       int64(17),
 		"abs(-17.6)":                     17.6,
