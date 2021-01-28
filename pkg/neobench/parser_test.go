@@ -117,6 +117,11 @@ func TestExpressions(t *testing.T) {
 		"(1 * (2 + 1))":   int64(3),
 		"(1 * (2 + (1)))": int64(3),
 
+		// Indexing
+		"[1,2][0]":             int64(1),
+		"[1,2][1]":             int64(2),
+		"range(1, 5)[abs(-1)]": int64(2),
+
 		// Functions
 		"abs(-17)":                       int64(17),
 		"abs(-17.6)":                     17.6,

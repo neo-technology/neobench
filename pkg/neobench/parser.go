@@ -224,6 +224,17 @@ func term(c *context) Expression {
 					args: []Expression{lhs, rhs},
 				},
 			}
+		} else if tok == '[' {
+			c.Next()
+			index := expr(c)
+			expect(c, ']')
+			lhs = Expression{
+				Kind: sliceExpr,
+				Payload: SliceExpr{
+					src: lhs,
+					i:   index,
+				},
+			}
 		} else {
 			return lhs
 		}
@@ -335,10 +346,12 @@ const (
 	stringExpr ExprKind = 3
 	// payload []Expression
 	listExpr ExprKind = 4
-	// payload []CallExpr
-	callExpr ExprKind = 5
+	// payload CallExpr
+	sliceExpr ExprKind = 5
+	// payload CallExpr
+	callExpr ExprKind = 6
 	// payload string (varname)
-	varExpr ExprKind = 6
+	varExpr ExprKind = 7
 )
 
 func (e ExprKind) String() string {
@@ -351,6 +364,7 @@ var exprKindNames = []string{
 	floatExpr:  "double",
 	stringExpr: "string",
 	listExpr:   "list",
+	sliceExpr:  "slice",
 	callExpr:   "call",
 	varExpr:    "var",
 }
@@ -375,6 +389,9 @@ func (e Expression) Eval(ctx *ScriptContext) (interface{}, error) {
 			out = append(out, exprResult)
 		}
 		return out, nil
+	case sliceExpr:
+		slice := e.Payload.(SliceExpr)
+		return slice.Eval(ctx)
 	case varExpr:
 		value, found := ctx.Vars[e.Payload.(string)]
 		if !found {
@@ -398,6 +415,8 @@ func (e Expression) String() string {
 		return fmt.Sprintf("\"%s\"", e.Payload)
 	case listExpr:
 		return fmt.Sprintf("%v", e.Payload)
+	case sliceExpr:
+		return e.Payload.(SliceExpr).String()
 	case callExpr:
 		return e.Payload.(CallExpr).String()
 	case varExpr:
@@ -405,6 +424,43 @@ func (e Expression) String() string {
 	default:
 		return fmt.Sprintf("err(%v)", e.Payload)
 	}
+}
+
+// Intended to be expanded into a richer slicing system, for now just simple indexing
+type SliceExpr struct {
+	src Expression
+	i   Expression
+}
+
+func (s SliceExpr) String() string {
+	return fmt.Sprintf("%s[%s]", s.src.String(), s.i.String())
+}
+
+func (s SliceExpr) Eval(ctx *ScriptContext) (interface{}, error) {
+	srcRaw, err := s.src.Eval(ctx)
+	if err != nil {
+		return nil, err
+	}
+	src, ok := srcRaw.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("slicing only work on lists, got %v", srcRaw)
+	}
+
+	iRaw, err := s.i.Eval(ctx)
+	if err != nil {
+		return nil, errors.Wrapf(err, "in slice %s", s.String())
+	}
+
+	iNum, err := asNumber(iRaw)
+	if err != nil {
+		return nil, errors.Wrapf(err, "expected integer as slice argument in %s", s.String())
+	}
+	if iNum.isDouble {
+		return nil, fmt.Errorf("floats can't be used as indexes in slices, in %s", s.String())
+	}
+	i := iNum.iVal
+
+	return src[i], nil
 }
 
 type CallExpr struct {
@@ -428,15 +484,7 @@ func (f CallExpr) argAsNumber(i int, ctx *ScriptContext) (Number, error) {
 	if err != nil {
 		return Number{}, err
 	}
-	switch value.(type) {
-	case int64:
-		iVal := value.(int64)
-		return Number{isDouble: false, val: float64(iVal), iVal: iVal}, nil
-	case float64:
-		return Number{isDouble: true, val: value.(float64)}, nil
-	default:
-		return Number{}, fmt.Errorf("expected int64 or float64, got %s (which is %T)", f.args[i].String(), value)
-	}
+	return asNumber(value)
 }
 
 func (f CallExpr) argAsString(i int, ctx *ScriptContext) (string, error) {
@@ -877,6 +925,20 @@ type Number struct {
 	val float64
 	// Only set if isDouble == false
 	iVal int64
+}
+
+func asNumber(raw interface{}) (Number, error) {
+	switch raw.(type) {
+	case int64:
+		iVal := raw.(int64)
+		return Number{isDouble: false, val: float64(iVal), iVal: iVal}, nil
+	case float64:
+		return Number{isDouble: true, val: raw.(float64)}, nil
+	case Number:
+		return raw.(Number), nil
+	default:
+		return Number{}, fmt.Errorf("expected int64 or float64, got %v", raw)
+	}
 }
 
 type context struct {
