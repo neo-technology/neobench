@@ -1,8 +1,10 @@
 package neobench
 
 import (
+	"fmt"
 	"github.com/codahale/hdrhistogram"
 	"github.com/neo4j/neo4j-go-driver/neo4j"
+	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"strings"
 	"sync"
@@ -11,6 +13,7 @@ import (
 
 type Worker struct {
 	workerId int64
+	tracer   opentracing.Tracer
 	driver   neo4j.Driver
 	now      func() time.Time
 	sleep    func(duration time.Duration)
@@ -107,15 +110,21 @@ func (w *Worker) gatherResults(workloadStats map[string]*ScriptResult, workStart
 }
 
 func (w *Worker) runUnit(session neo4j.Session, uow UnitOfWork) uowOutcome {
+	span := w.tracer.StartSpan("tx").SetTag("worker", w.workerId)
+	defer span.Finish()
 	transaction := func(tx neo4j.Transaction) (interface{}, error) {
 		for _, s := range uow.Statements {
-			res, err := tx.Run(s.Query, s.Params)
-			if err != nil {
-				return nil, err
-			}
-			_, err = res.Consume()
-			if err != nil {
-				return nil, err
+			{
+				qspan := w.tracer.StartSpan("query", opentracing.ChildOf(span.Context())).SetTag("query", s.Query)
+				defer qspan.Finish()
+				res, err := tx.Run(s.Query, s.Params)
+				if err != nil {
+					return nil, err
+				}
+				_, err = res.Consume()
+				if err != nil {
+					return nil, err
+				}
 			}
 		}
 		return nil, nil
@@ -123,12 +132,15 @@ func (w *Worker) runUnit(session neo4j.Session, uow UnitOfWork) uowOutcome {
 
 	var err error
 	if uow.Readonly {
-		_, err = session.ReadTransaction(transaction)
+		span.SetTag("mode", "readonly")
+		_, err = session.ReadTransaction(transaction, txAsChildOfSpan(w.tracer, span))
 	} else {
-		_, err = session.WriteTransaction(transaction)
+		span.SetTag("mode", "write")
+		_, err = session.WriteTransaction(transaction, txAsChildOfSpan(w.tracer, span))
 	}
 
 	if err != nil {
+		span.SetTag("outcome", fmt.Sprintf("err: %s", err))
 		return uowOutcome{
 			succeeded:    false,
 			failureGroup: groupError(err),
@@ -136,7 +148,23 @@ func (w *Worker) runUnit(session neo4j.Session, uow UnitOfWork) uowOutcome {
 		}
 	}
 
+	span.SetTag("outcome", "ok")
 	return uowOutcome{succeeded: true}
+}
+
+// transaction modified that adds the given span as a parent for neo4j to pick up and trace with
+func txAsChildOfSpan(tracer opentracing.Tracer, span opentracing.Span) func(config *neo4j.TransactionConfig) {
+	serializedSpan := make(map[string]string)
+	carrier := opentracing.TextMapCarrier(serializedSpan)
+	err := tracer.Inject(span.Context(), opentracing.TextMap, carrier)
+	if err != nil {
+		panic(err)
+	}
+	return func(config *neo4j.TransactionConfig) {
+		config.Metadata = map[string]interface{}{
+			"opentrace.ctx": serializedSpan,
+		}
+	}
 }
 
 // Converts a total target rate into a per-client "pacing" duration, used to slow down workers to match
@@ -307,9 +335,10 @@ type uowOutcome struct {
 	err          error
 }
 
-func NewWorker(driver neo4j.Driver, workerId int64) *Worker {
+func NewWorker(driver neo4j.Driver, tracer opentracing.Tracer, workerId int64) *Worker {
 	return &Worker{
 		workerId: workerId,
+		tracer:   tracer,
 		driver:   driver,
 		now:      time.Now,
 		sleep:    time.Sleep,

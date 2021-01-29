@@ -3,6 +3,7 @@ package neobench
 import (
 	"fmt"
 	"github.com/neo4j/neo4j-go-driver/neo4j"
+	"github.com/opentracing/opentracing-go"
 	"github.com/stretchr/testify/assert"
 	"math/rand"
 	"net/url"
@@ -25,6 +26,7 @@ func TestMaintainsRateInFaceOfFailure(t *testing.T) {
 	w := Worker{
 		workerId: 0,
 		driver:   driver,
+		tracer:   opentracing.NoopTracer{},
 		now:      clock.now,
 		sleep:    clock.sleep,
 	}

@@ -4,8 +4,10 @@ import (
 	"flag"
 	"fmt"
 	"github.com/neo4j/neo4j-go-driver/neo4j"
+	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
+	jaegercfg "github.com/uber/jaeger-client-go/config"
 	"io/ioutil"
 	"log"
 	"math/rand"
@@ -32,6 +34,7 @@ var fProgress time.Duration
 var fVariables map[string]string
 var fWorkloads []string
 var fOutputFormat string
+var fOpenTraceMode string
 
 func init() {
 	pflag.BoolVarP(&fInitMode, "init", "i", false, "when running built-in workloads, run their built-in dataset generator first")
@@ -48,6 +51,7 @@ func init() {
 	pflag.StringSliceVarP(&fWorkloads, "workload", "w", []string{"builtin:tpcb-like"}, "path to workload script or builtin:[tpcb-like,ldbc-like]")
 	pflag.BoolVarP(&fLatencyMode, "latency", "l", false, "run in latency testing more rather than throughput mode")
 	pflag.StringVarP(&fOutputFormat, "output", "o", "auto", "output format, `auto`, `interactive` or `csv`")
+	pflag.StringVar(&fOpenTraceMode, "tracing", "", "set to 'jaeger' to enable Jaeger open tracing")
 }
 
 func main() {
@@ -75,6 +79,22 @@ Options:
 		log.Fatal(err)
 	}
 
+	var tracer opentracing.Tracer = opentracing.NoopTracer{}
+	if fOpenTraceMode == "jaeger" {
+		cfg, err := jaegercfg.FromEnv()
+		if err != nil {
+			// parsing errors might happen here, such as when we get a string where we expect a number
+			log.Printf("Could not parse Jaeger env vars: %s", err.Error())
+			return
+		}
+		jaegerTracer, closer, err := cfg.NewTracer(jaegercfg.Tag("scenario", scenario))
+		if err != nil {
+			panic(err)
+		}
+		tracer = jaegerTracer
+		defer closer.Close()
+	}
+
 	var encryptionMode neobench.EncryptionMode
 	switch strings.ToLower(fEncryptionMode) {
 	case "auto":
@@ -99,6 +119,8 @@ Options:
 
 	variables := make(map[string]interface{})
 	variables["scale"] = fScale
+	variables["clients"] = fClients
+
 	for k, v := range fVariables {
 		intVal, err := strconv.ParseInt(v, 10, 64)
 		if err == nil {
@@ -131,7 +153,7 @@ Options:
 	}
 
 	if fLatencyMode {
-		result, err := runBenchmark(driver, fAddress, dbName, scenario, out, wrk, fDuration, fLatencyMode, fClients, fRate, fProgress)
+		result, err := runBenchmark(driver, tracer, fAddress, dbName, scenario, out, wrk, fDuration, fLatencyMode, fClients, fRate, fProgress)
 		if err != nil {
 			out.Errorf(err.Error())
 			os.Exit(1)
@@ -143,7 +165,7 @@ Options:
 			os.Exit(1)
 		}
 	} else {
-		result, err := runBenchmark(driver, fAddress, dbName, scenario, out, wrk, fDuration, fLatencyMode, fClients, fRate, fProgress)
+		result, err := runBenchmark(driver, tracer, fAddress, dbName, scenario, out, wrk, fDuration, fLatencyMode, fClients, fRate, fProgress)
 		if err != nil {
 			out.Errorf(err.Error())
 			os.Exit(1)
@@ -291,7 +313,7 @@ func describeScenario() string {
 	return out.String()
 }
 
-func runBenchmark(driver neo4j.Driver, url, databaseName, scenario string, out neobench.Output, wrk neobench.Workload,
+func runBenchmark(driver neo4j.Driver, tracer opentracing.Tracer, url, databaseName, scenario string, out neobench.Output, wrk neobench.Workload,
 	runtime time.Duration, latencyMode bool, numClients int, rate float64, progressInterval time.Duration) (neobench.Result, error) {
 	stopCh, stop := neobench.SetupSignalHandler()
 	defer stop()
@@ -310,7 +332,7 @@ func runBenchmark(driver neo4j.Driver, url, databaseName, scenario string, out n
 		wg.Add(1)
 		recorder := neobench.NewResultRecorder(int64(i))
 		resultRecorders = append(resultRecorders, recorder)
-		worker := neobench.NewWorker(driver, int64(i))
+		worker := neobench.NewWorker(driver, tracer, int64(i))
 		workerId := i
 		clientWork := wrk.NewClient()
 		go func() {
