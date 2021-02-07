@@ -2,7 +2,7 @@ package neobench
 
 import (
 	"fmt"
-	"github.com/neo4j/neo4j-go-driver/neo4j"
+	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
 	"github.com/stretchr/testify/assert"
 	"math/rand"
 	"net/url"
@@ -85,8 +85,8 @@ func (d *fakeDriver) Session(accessMode neo4j.AccessMode, bookmarks ...string) (
 	panic("implement me")
 }
 
-func (d *fakeDriver) NewSession(config neo4j.SessionConfig) (neo4j.Session, error) {
-	return d, nil
+func (d *fakeDriver) NewSession(config neo4j.SessionConfig) neo4j.Session {
+	return d
 }
 
 func (d *fakeDriver) Close() error {

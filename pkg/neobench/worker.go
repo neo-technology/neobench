@@ -2,8 +2,9 @@ package neobench
 
 import (
 	"github.com/codahale/hdrhistogram"
-	"github.com/neo4j/neo4j-go-driver/neo4j"
+	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
 	"github.com/pkg/errors"
+	"math/rand"
 	"strings"
 	"sync"
 	"time"
@@ -25,13 +26,12 @@ type Worker struct {
 // If numTransactions is 0, we go until stopCh tells us to stop
 func (w *Worker) RunBenchmark(wrk ClientWorkload, databaseName string, transactionRate time.Duration,
 	numTransactions uint64, stopCh <-chan struct{}, recorder *ResultRecorder) WorkerResult {
-	session, err := w.driver.NewSession(neo4j.SessionConfig{
+	session := w.driver.NewSession(neo4j.SessionConfig{
 		AccessMode:   neo4j.AccessModeWrite,
 		DatabaseName: databaseName,
+		Bookmarks:    nil,
+		FetchSize:    neo4j.FetchAll,
 	})
-	if err != nil {
-		return WorkerResult{WorkerId: w.workerId, Error: err}
-	}
 	defer session.Close()
 
 	workStartTime := w.now()
@@ -108,21 +108,56 @@ func (w *Worker) gatherResults(workloadStats map[string]*ScriptResult, workStart
 
 func (w *Worker) runUnit(session neo4j.Session, uow UnitOfWork) uowOutcome {
 	transaction := func(tx neo4j.Transaction) (interface{}, error) {
+		var lastResult neo4j.Result
+
 		for _, s := range uow.Statements {
 			res, err := tx.Run(s.Query, s.Params)
 			if err != nil {
 				return nil, err
 			}
-			_, err = res.Consume()
+			_, err = res.(neo4j.Result).Consume()
 			if err != nil {
 				return nil, err
 			}
+			lastResult = res
 		}
-		return nil, nil
+		return lastResult, nil
+	}
+
+	autocommitTransaction := func(session neo4j.Session) (interface{}, error) {
+		var lastResult neo4j.Result
+		var retries = 100
+		var res interface{}
+		var err error
+
+		for _, s := range uow.Statements {
+			var retriesThisTime = retries
+			for i := 0; i < retriesThisTime; i++ {
+				res, err = session.Run(s.Query, s.Params)
+				if err == nil {
+					_, err = res.(neo4j.Result).Consume()
+				}
+				if err == nil {
+					break
+				}
+				sleepFor := rand.Intn(10)
+				w.sleep(time.Duration(i*10+sleepFor) * time.Millisecond)
+				retries = retries - 1
+			}
+
+			if err != nil {
+				return nil, err
+			}
+
+			lastResult = res.(neo4j.Result)
+		}
+		return lastResult, nil
 	}
 
 	var err error
-	if uow.Readonly {
+	if uow.Autocommit {
+		_, err = autocommitTransaction(session)
+	} else if uow.Readonly {
 		_, err = session.ReadTransaction(transaction)
 	} else {
 		_, err = session.WriteTransaction(transaction)

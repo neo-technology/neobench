@@ -8,6 +8,7 @@ require (
 	github.com/google/go-cmp v0.5.2 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/neo4j/neo4j-go-driver v1.8.3
+	github.com/neo4j/neo4j-go-driver/v4 v4.2.2
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	github.com/onsi/ginkgo v1.13.0 // indirect
 	github.com/pkg/errors v0.9.1

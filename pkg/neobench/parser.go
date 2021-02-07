@@ -16,6 +16,12 @@ func Parse(filename, script string, weight float64) (Script, error) {
 	c := newParseContext(script, filename)
 
 	commands := make([]Command, 0)
+	var output = Script{
+		Name:       filename,
+		Readonly:   false, // this is updated by metaMetaCommand as required
+		Autocommit: false, // this is updated by metaMetaCommand as required
+		Weight:     weight,
+	}
 
 	for !c.done {
 		tok := c.PeekToken()
@@ -23,6 +29,8 @@ func Parse(filename, script string, weight float64) (Script, error) {
 			break
 		} else if tok == '\\' {
 			commands = append(commands, metaCommand(c))
+		} else if tok == '#' {
+			output = *metaMetaCommand(output, c)
 		} else if tok == '\n' {
 			c.Next()
 		} else {
@@ -34,12 +42,25 @@ func Parse(filename, script string, weight float64) (Script, error) {
 		return Script{}, c.err
 	}
 
-	return Script{
-		Name:     filename,
-		Readonly: false, // TODO
-		Commands: commands,
-		Weight:   weight,
-	}, nil
+	output.Commands = commands
+	return output, nil
+}
+
+func metaMetaCommand(output Script, c *parseContext) *Script {
+	expect(c, '#')
+	cmd := ident(c)
+
+	switch cmd {
+	case "autocommit":
+		output.Autocommit = true
+		return &output
+	case "readonly":
+		output.Readonly = true
+		return &output
+	default:
+		c.fail(fmt.Errorf("unexpected meta command: '%s'", cmd))
+		return nil
+	}
 }
 
 func metaCommand(c *parseContext) Command {

@@ -1,7 +1,7 @@
 package builtin
 
 import (
-	"github.com/neo4j/neo4j-go-driver/neo4j"
+	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
 	"neobench/pkg/neobench"
 )
 
@@ -29,13 +29,10 @@ func InitTPCBLike(scale int64, dbName string, driver neo4j.Driver, out neobench.
 	numBranches := 1 * scale
 	numTellers := 10 * scale
 	numAccounts := 100000 * scale
-	session, err := driver.NewSession(neo4j.SessionConfig{
+	session := driver.NewSession(neo4j.SessionConfig{
 		AccessMode:   neo4j.AccessModeWrite,
 		DatabaseName: dbName,
 	})
-	if err != nil {
-		return err
-	}
 	defer session.Close()
 
 	out.ReportProgress(neobench.ProgressReport{
@@ -44,7 +41,7 @@ func InitTPCBLike(scale int64, dbName string, driver neo4j.Driver, out neobench.
 		Completeness: 0,
 	})
 
-	err = ensureSchema(session, []schemaEntry{
+	var err = ensureSchema(session, []schemaEntry{
 		{Label: "Branch", Property: "bid", Unique: true},
 		{Label: "Teller", Property: "tid", Unique: true},
 		{Label: "Account", Property: "aid", Unique: true},

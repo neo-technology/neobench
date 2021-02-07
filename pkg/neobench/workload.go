@@ -2,7 +2,7 @@ package neobench
 
 import (
 	"fmt"
-	"github.com/neo4j/neo4j-go-driver/neo4j"
+	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
 	"github.com/pkg/errors"
 	"io"
 	"math/rand"
@@ -101,10 +101,11 @@ func (w *WeightedRandom) Draw(r *rand.Rand) interface{} {
 
 type Script struct {
 	// Either path to script provided by user, or builtin:<name>
-	Name     string
-	Readonly bool
-	Weight   float64
-	Commands []Command
+	Name       string
+	Readonly   bool
+	Weight     float64
+	Commands   []Command
+	Autocommit bool
 }
 
 // Context that scripts are executed in; these are not thread safe, and are re-created on each script
@@ -122,6 +123,7 @@ func (s *Script) Eval(ctx ScriptContext) (UnitOfWork, error) {
 	uow := UnitOfWork{
 		ScriptName: s.Name,
 		Readonly:   s.Readonly,
+		Autocommit: s.Autocommit,
 		Statements: nil,
 	}
 
@@ -170,6 +172,7 @@ type UnitOfWork struct {
 	ScriptName string
 	Readonly   bool
 	Statements []Statement
+	Autocommit bool
 }
 
 type Statement struct {
@@ -234,13 +237,10 @@ func (c SleepCommand) Execute(ctx *ScriptContext, uow *UnitOfWork) error {
 // Validates that a workload doesn't have syntax errors etc, and tells us if it is read-only
 func WorkloadPreflight(driver neo4j.Driver, dbName string, script Script, vars map[string]interface{},
 	csvLoader *CsvLoader) (readonly bool, err error) {
-	session, err := driver.NewSession(neo4j.SessionConfig{
+	session := driver.NewSession(neo4j.SessionConfig{
 		AccessMode:   neo4j.AccessModeWrite,
 		DatabaseName: dbName,
 	})
-	if err != nil {
-		return false, err
-	}
 	r := rand.New(rand.NewSource(1337))
 
 	unitOfWork, err := script.Eval(ScriptContext{
