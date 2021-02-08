@@ -126,7 +126,7 @@ func (w *Worker) runUnit(session neo4j.Session, uow UnitOfWork) uowOutcome {
 
 	autocommitTransaction := func(session neo4j.Session) (interface{}, error) {
 		var lastResult neo4j.Result
-		var retries = 100
+		var retries = 20
 		var res interface{}
 		var err error
 
@@ -140,8 +140,8 @@ func (w *Worker) runUnit(session neo4j.Session, uow UnitOfWork) uowOutcome {
 				if err == nil {
 					break
 				}
-				sleepFor := rand.Intn(10)
-				w.sleep(time.Duration(i*10+sleepFor) * time.Millisecond)
+				jitter := rand.Intn(100)
+				w.sleep(time.Duration(i*10+jitter) * time.Millisecond)
 				retries = retries - 1
 			}
 
@@ -155,12 +155,14 @@ func (w *Worker) runUnit(session neo4j.Session, uow UnitOfWork) uowOutcome {
 	}
 
 	var err error
-	if uow.Autocommit {
-		_, err = autocommitTransaction(session)
-	} else if uow.Readonly {
+	if uow.Readonly {
 		_, err = session.ReadTransaction(transaction)
 	} else {
-		_, err = session.WriteTransaction(transaction)
+		if uow.Autocommit {
+			_, err = autocommitTransaction(session)
+		} else {
+			_, err = session.WriteTransaction(transaction)
+		}
 	}
 
 	if err != nil {
