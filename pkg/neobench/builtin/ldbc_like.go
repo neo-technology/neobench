@@ -2,7 +2,7 @@ package builtin
 
 import (
 	"fmt"
-	"github.com/neo4j/neo4j-go-driver/neo4j"
+	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
 	"github.com/pkg/errors"
 	"math/rand"
 	"neobench/pkg/neobench"
@@ -117,13 +117,10 @@ func InitLDBCLike(scale, seed int64, dbName string, driver neo4j.Driver, out neo
 	now := time.Date(ldbcStartYear, 1, 1, 0, 0, 0, 0, time.UTC)
 	daysOfActivity := 365 * 10
 
-	session, err := driver.NewSession(neo4j.SessionConfig{
+	session := driver.NewSession(neo4j.SessionConfig{
 		AccessMode:   neo4j.AccessModeWrite,
 		DatabaseName: dbName,
 	})
-	if err != nil {
-		return err
-	}
 	defer session.Close()
 
 	// Make sure we're working against a db with no ldbc data in it; we are not (yet!) reentrant
