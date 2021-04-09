@@ -17,7 +17,7 @@ const (
 	EncryptionOn   EncryptionMode = 2
 )
 
-func NewDriver(urlStr, user, password string, encryptionMode EncryptionMode) (neo4j.Driver, error) {
+func NewDriver(urlStr, user, password string, encryptionMode EncryptionMode, checkCertificates bool) (neo4j.Driver, error) {
 
 	if encryptionMode == EncryptionAuto {
 		enabled, err := isTlsEnabled(urlStr)
@@ -35,7 +35,11 @@ func NewDriver(urlStr, user, password string, encryptionMode EncryptionMode) (ne
 	case EncryptionOff:
 		urlStr = "neo4j://" + strings.SplitN(urlStr, "://", 2)[1]
 	case EncryptionOn:
-		urlStr = "neo4j+s://" + strings.SplitN(urlStr, "://", 2)[1]
+		if checkCertificates {
+			urlStr = "neo4j+s://" + strings.SplitN(urlStr, "://", 2)[1]
+		} else {
+			urlStr = "neo4j+ssc://" + strings.SplitN(urlStr, "://", 2)[1]
+		}
 	case EncryptionAuto:
 		panic("this should not be reached")
 	}
@@ -55,7 +59,10 @@ func isTlsEnabled(urlStr string) (bool, error) {
 		port = "7687"
 	}
 
-	socket, err := tls.Dial("tcp", fmt.Sprintf("%s:%s", host, port), &tls.Config{InsecureSkipVerify: true})
+	socket, err := tls.Dial("tcp", fmt.Sprintf("%s:%s", host, port), &tls.Config{
+		InsecureSkipVerify: true,
+		ServerName:         host,
+	})
 	if err != nil {
 		if err == io.EOF {
 			return false, nil
