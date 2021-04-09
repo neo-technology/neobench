@@ -3,9 +3,10 @@ package neobench
 import (
 	"crypto/tls"
 	"fmt"
-	"github.com/neo4j/neo4j-go-driver/neo4j"
+	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
 	"io"
 	"net/url"
+	"strings"
 )
 
 type EncryptionMode int
@@ -16,23 +17,34 @@ const (
 	EncryptionOn   EncryptionMode = 2
 )
 
-func NewDriver(urlStr, user, password string, encryptionMode EncryptionMode) (neo4j.Driver, error) {
-	var encrypted bool
-	switch encryptionMode {
-	case EncryptionOff:
-		encrypted = false
-	case EncryptionOn:
-		encrypted = true
-	case EncryptionAuto:
+func NewDriver(urlStr, user, password string, encryptionMode EncryptionMode, checkCertificates bool) (neo4j.Driver, error) {
+
+	if encryptionMode == EncryptionAuto {
 		enabled, err := isTlsEnabled(urlStr)
 		if err != nil {
 			return nil, err
 		}
-		encrypted = enabled
+		if enabled {
+			encryptionMode = EncryptionOn
+		} else {
+			encryptionMode = EncryptionOff
+		}
 	}
 
-	config := func(conf *neo4j.Config) { conf.Encrypted = encrypted }
-	return neo4j.NewDriver(urlStr, neo4j.BasicAuth(user, password, ""), config)
+	switch encryptionMode {
+	case EncryptionOff:
+		urlStr = "neo4j://" + strings.SplitN(urlStr, "://", 2)[1]
+	case EncryptionOn:
+		if checkCertificates {
+			urlStr = "neo4j+s://" + strings.SplitN(urlStr, "://", 2)[1]
+		} else {
+			urlStr = "neo4j+ssc://" + strings.SplitN(urlStr, "://", 2)[1]
+		}
+	case EncryptionAuto:
+		panic("this should not be reached")
+	}
+
+	return neo4j.NewDriver(urlStr, neo4j.BasicAuth(user, password, ""))
 }
 
 func isTlsEnabled(urlStr string) (bool, error) {
@@ -47,7 +59,10 @@ func isTlsEnabled(urlStr string) (bool, error) {
 		port = "7687"
 	}
 
-	socket, err := tls.Dial("tcp", fmt.Sprintf("%s:%s", host, port), &tls.Config{InsecureSkipVerify: true})
+	socket, err := tls.Dial("tcp", fmt.Sprintf("%s:%s", host, port), &tls.Config{
+		InsecureSkipVerify: true,
+		ServerName:         host,
+	})
 	if err != nil {
 		if err == io.EOF {
 			return false, nil

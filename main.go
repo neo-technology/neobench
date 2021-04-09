@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/neo4j/neo4j-go-driver/neo4j"
+	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
 	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
 	"io/ioutil"
@@ -32,6 +32,7 @@ var fProgress time.Duration
 var fVariables map[string]string
 var fWorkloads []string
 var fOutputFormat string
+var fNoCheckCertificates bool
 
 func init() {
 	pflag.BoolVarP(&fInitMode, "init", "i", false, "when running built-in workloads, run their built-in dataset generator first")
@@ -42,6 +43,7 @@ func init() {
 	pflag.StringVarP(&fUser, "user", "u", "neo4j", "username")
 	pflag.StringVarP(&fPassword, "password", "p", "neo4j", "password")
 	pflag.StringVarP(&fEncryptionMode, "encryption", "e", "auto", "whether to use encryption, `auto`, `true` or `false`")
+	pflag.BoolVar(&fNoCheckCertificates, "no-check-certificates", false, "disable TLS certificate validation, exposes your credentials to anyone on the network")
 	pflag.DurationVarP(&fDuration, "duration", "d", 60*time.Second, "duration to run, ex: 15s, 1m, 10h")
 	pflag.DurationVar(&fProgress, "progress", 10*time.Second, "interval to report progress, ex: 15s, 1m, 1h")
 	pflag.StringToStringVarP(&fVariables, "define", "D", nil, "defines variables for workload scripts and query parameters")
@@ -92,7 +94,7 @@ Options:
 		dbName = pflag.Arg(0)
 	}
 
-	driver, err := neobench.NewDriver(fAddress, fUser, fPassword, encryptionMode)
+	driver, err := neobench.NewDriver(fAddress, fUser, fPassword, encryptionMode, !fNoCheckCertificates)
 	if err != nil {
 		log.Fatal(err)
 	}

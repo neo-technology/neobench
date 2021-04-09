@@ -15,18 +15,23 @@ import (
 func Parse(filename, script string, weight float64) (Script, error) {
 	c := newParseContext(script, filename)
 
-	commands := make([]Command, 0)
+	var output = Script{
+		Name:       filename,
+		Readonly:   false, // this is determined by running explain on the query
+		Autocommit: false, // this is updated by setting `\opt autocommit` in your script
+		Weight:     weight,
+	}
 
 	for !c.done {
 		tok := c.PeekToken()
 		if tok == scanner.EOF {
 			break
 		} else if tok == '\\' {
-			commands = append(commands, metaCommand(c))
+			parseMetaCommand(&output, c)
 		} else if tok == '\n' {
 			c.Next()
 		} else {
-			commands = append(commands, command(c))
+			output.Commands = append(output.Commands, command(c))
 		}
 	}
 
@@ -34,26 +39,30 @@ func Parse(filename, script string, weight float64) (Script, error) {
 		return Script{}, c.err
 	}
 
-	return Script{
-		Name:     filename,
-		Readonly: false, // TODO
-		Commands: commands,
-		Weight:   weight,
-	}, nil
+	return output, nil
 }
 
-func metaCommand(c *parseContext) Command {
+func parseMetaCommand(s *Script, c *parseContext) {
 	expect(c, '\\')
 	cmd := ident(c)
 
 	switch cmd {
+	case "opt":
+		opt := ident(c)
+
+		switch opt {
+		case "autocommit":
+			s.Autocommit = true
+		default:
+			c.fail(fmt.Errorf("unexpected opt: '%s'", opt))
+		}
 	case "set":
 		varName := ident(c)
 		setExpr := expr(c)
-		return SetCommand{
+		s.Commands = append(s.Commands, SetCommand{
 			VarName:    varName,
 			Expression: setExpr,
-		}
+		})
 	case "sleep":
 		durationBase := expr(c)
 		unit := time.Second
@@ -71,16 +80,14 @@ func metaCommand(c *parseContext) Command {
 				unit = time.Microsecond
 			default:
 				c.fail(fmt.Errorf("\\sleep command must use 'us', 'ms', or 's' unit argument - or none. got: %s", unitStr))
-				return nil
 			}
 		}
-		return SleepCommand{
+		s.Commands = append(s.Commands, SleepCommand{
 			Duration: durationBase,
 			Unit:     unit,
-		}
+		})
 	default:
 		c.fail(fmt.Errorf("unexpected meta command: '%s'", cmd))
-		return nil
 	}
 }
 
