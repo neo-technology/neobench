@@ -15,7 +15,6 @@ import (
 func Parse(filename, script string, weight float64) (Script, error) {
 	c := newParseContext(script, filename)
 
-	commands := make([]Command, 0)
 	var output = Script{
 		Name:       filename,
 		Readonly:   false, // this is determined by running explain on the query
@@ -28,11 +27,11 @@ func Parse(filename, script string, weight float64) (Script, error) {
 		if tok == scanner.EOF {
 			break
 		} else if tok == '\\' {
-			output = *metaCommand(output, c)
+			parseMetaCommand(&output, c)
 		} else if tok == '\n' {
 			c.Next()
 		} else {
-			commands = append(commands, command(c))
+			output.Commands = append(output.Commands, command(c))
 		}
 	}
 
@@ -40,30 +39,23 @@ func Parse(filename, script string, weight float64) (Script, error) {
 		return Script{}, c.err
 	}
 
-	output.Commands = commands
 	return output, nil
 }
 
-func setOpt(output Script, c *parseContext) *Script {
-	cmd := ident(c)
-
-	switch cmd {
-	case "autocommit":
-		output.Autocommit = true
-		return &output
-	default:
-		c.fail(fmt.Errorf("unexpected opt: '%s'", cmd))
-		return nil
-	}
-}
-
-func metaCommand(s Script, c *parseContext) *Script {
+func parseMetaCommand(s *Script, c *parseContext) {
 	expect(c, '\\')
 	cmd := ident(c)
 
 	switch cmd {
 	case "opt":
-		s = *setOpt(s, c)
+		opt := ident(c)
+
+		switch opt {
+		case "autocommit":
+			s.Autocommit = true
+		default:
+			c.fail(fmt.Errorf("unexpected opt: '%s'", opt))
+		}
 	case "set":
 		varName := ident(c)
 		setExpr := expr(c)
@@ -88,7 +80,6 @@ func metaCommand(s Script, c *parseContext) *Script {
 				unit = time.Microsecond
 			default:
 				c.fail(fmt.Errorf("\\sleep command must use 'us', 'ms', or 's' unit argument - or none. got: %s", unitStr))
-				return nil
 			}
 		}
 		s.Commands = append(s.Commands, SleepCommand{
@@ -97,9 +88,7 @@ func metaCommand(s Script, c *parseContext) *Script {
 		})
 	default:
 		c.fail(fmt.Errorf("unexpected meta command: '%s'", cmd))
-		return nil
 	}
-	return &s
 }
 
 func command(c *parseContext) Command {

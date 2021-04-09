@@ -12,7 +12,7 @@ import (
 const LDBCIC2 = `
 \set personId random(1, 9892 * $scale)
 
-MATCH (:Person {id:$personId})-[:KNOWS]-(friend),
+MATCH (:Person {id:{personId}})-[:KNOWS]-(friend),
       (friend)<-[:HAS_CREATOR]-(message)
 WHERE message.creationDate <= date({year: 2010, month:10, day:10})
 RETURN friend.id AS personId,
