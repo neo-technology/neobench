@@ -241,6 +241,8 @@ func WorkloadPreflight(driver neo4j.Driver, dbName string, script Script, vars m
 		AccessMode:   neo4j.AccessModeWrite,
 		DatabaseName: dbName,
 	})
+	defer session.Close()
+  
 	r := rand.New(rand.NewSource(1337))
 
 	unitOfWork, err := script.Eval(ScriptContext{
