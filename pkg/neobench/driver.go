@@ -17,7 +17,8 @@ const (
 	EncryptionOn   EncryptionMode = 2
 )
 
-func NewDriver(urlStr, user, password string, encryptionMode EncryptionMode, checkCertificates bool) (neo4j.Driver, error) {
+func NewDriver(urlStr, user, password string, encryptionMode EncryptionMode, checkCertificates bool,
+	configurers ...func(*neo4j.Config)) (neo4j.Driver, error) {
 
 	if encryptionMode == EncryptionAuto {
 		enabled, err := isTlsEnabled(urlStr)
@@ -44,7 +45,7 @@ func NewDriver(urlStr, user, password string, encryptionMode EncryptionMode, che
 		panic("this should not be reached")
 	}
 
-	return neo4j.NewDriver(urlStr, neo4j.BasicAuth(user, password, ""))
+	return neo4j.NewDriver(urlStr, neo4j.BasicAuth(user, password, ""), configurers...)
 }
 
 func isTlsEnabled(urlStr string) (bool, error) {
