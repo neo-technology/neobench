@@ -10,10 +10,18 @@ import (
 	"time"
 )
 
+// Temporary, can remove by 1.0, just to help people along
+func TestBackslashToColonBreakingChange(t *testing.T) {
+	_, err := Parse("sleep", `\set sleeptime 13
+RETURN 1;`, 1)
+
+	assert.Errorf(t, err, "meta-commands now use ':' rather than '\\' as prefix to align with the rest of the Neo4j ecosystem")
+}
+
 func TestSleep(t *testing.T) {
 	vars := map[string]interface{}{"scale": int64(1)}
-	script, err := Parse("sleep", `\set sleeptime 13
-\sleep $sleeptime us
+	script, err := Parse("sleep", `:set sleeptime 13
+:sleep $sleeptime us
 RETURN 1;`, 1)
 
 	assert.NoError(t, err)
@@ -35,23 +43,23 @@ func TestSleepDuration(t *testing.T) {
 		expectSleepDuration time.Duration
 		expectError         error
 	}{
-		"\\sleep 10": {
+		":sleep 10": {
 			expectSleepDuration: 10 * time.Second,
 		},
-		"\\sleep 10 s": {
+		":sleep 10 s": {
 			expectSleepDuration: 10 * time.Second,
 		},
-		"\\sleep 10s": {
+		":sleep 10s": {
 			expectSleepDuration: 10 * time.Second,
 		},
-		"\\sleep 10 ms": {
+		":sleep 10 ms": {
 			expectSleepDuration: 10 * time.Millisecond,
 		},
-		"\\sleep 10 us": {
+		":sleep 10 us": {
 			expectSleepDuration: 10 * time.Microsecond,
 		},
-		"\\sleep 10 days": {
-			expectError: fmt.Errorf("\\sleep command must use 'us', 'ms', or 's' unit argument - or none. got: days (at testSleep:'\\sleep 10 days':1:15)"),
+		":sleep 10 days": {
+			expectError: fmt.Errorf(":sleep command must use 'us', 'ms', or 's' unit argument - or none. got: days (at testSleep:':sleep 10 days':1:15)"),
 		},
 	}
 
@@ -166,7 +174,7 @@ func TestExpressions(t *testing.T) {
 		expr, expected := expr, expected
 		t.Run(expr, func(t *testing.T) {
 			vars := map[string]interface{}{"scale": int64(1), "somelist": []interface{}{int64(1), int64(2)}}
-			script, err := Parse(fmt.Sprintf("expr:'%s'", expr), fmt.Sprintf(`\set v %s
+			script, err := Parse(fmt.Sprintf("expr:'%s'", expr), fmt.Sprintf(`:set v %s
 RETURN {v};`, expr), 1)
 
 			assert.NoError(t, err)
@@ -194,7 +202,7 @@ RETURN {v};`, expr), 1)
 
 func TestDebugFunction(t *testing.T) {
 	vars := map[string]interface{}{"scale": int64(1)}
-	script, err := Parse("test:debug(..)", "\\set blah debug(1337) * 10\nRETURN { blah };", 1)
+	script, err := Parse("test:debug(..)", ":set blah debug(1337) * 10\nRETURN { blah };", 1)
 
 	assert.NoError(t, err)
 	if err != nil {
@@ -216,7 +224,7 @@ func TestComment(t *testing.T) {
 	vars := map[string]interface{}{"scale": int64(1)}
 	script, err := Parse("sleep", `
 // This is a comment on the set metacommand
-\set sleeptime 13 // this is a comment at end-of-line in a metacommand
+:set sleeptime 13 // this is a comment at end-of-line in a metacommand
 
 // This is a comment on a query
 RETURN {sleeptime};`, 1)
@@ -240,10 +248,10 @@ RETURN {sleeptime};`, 1)
 func TestExcludesUnusedParams(t *testing.T) {
 	vars := map[string]interface{}{"scale": int64(1)}
 	script, err := Parse("sleep", `
-\set notSent 13
-\set sent $notSent + 10
-\set alsoSent $notSent + 1
-\set quotedSent $notSent + 2
+:set notSent 13
+:set sent $notSent + 10
+:set alsoSent $notSent + 1
+:set quotedSent $notSent + 2
 
 RETURN {sent} + $alsoSent`+" + {`quotedSent`};", 1)
 
@@ -265,8 +273,8 @@ RETURN {sent} + $alsoSent`+" + {`quotedSent`};", 1)
 func TestMultiQuery(t *testing.T) {
 	vars := map[string]interface{}{"scale": int64(1), "ids": []interface{}{1}}
 	script, err := Parse("sleep", `
-\set comp [ i in range(1, 10) | {i: $i, id: $ids[random(0, len($ids))]} ]
-\set date "2021-01-27"
+:set comp [ i in range(1, 10) | {i: $i, id: $ids[random(0, len($ids))]} ]
+:set date "2021-01-27"
 
 MATCH (a);
 MATCH (b);`, 1)

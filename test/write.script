@@ -1,3 +1,3 @@
-\set myparam random(1, 10 * $scale) + $myvar
+:set myparam random(1, 10 * $scale) + $myvar
 
 CREATE (n:MyNode {myparam: $myparam, myvar: $myvar});

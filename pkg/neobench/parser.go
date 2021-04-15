@@ -27,6 +27,10 @@ func Parse(filename, script string, weight float64) (Script, error) {
 		if tok == scanner.EOF {
 			break
 		} else if tok == '\\' {
+			c.fail(fmt.Errorf("breaking change: meta-commands now use ':' rather than '\\' as prefix " +
+				"to align with the rest of the Neo4j ecosystem"))
+			break
+		} else if tok == ':' {
 			parseMetaCommand(&output, c)
 		} else if tok == '\n' {
 			c.Next()
@@ -43,7 +47,7 @@ func Parse(filename, script string, weight float64) (Script, error) {
 }
 
 func parseMetaCommand(s *Script, c *parseContext) {
-	expect(c, '\\')
+	expect(c, ':')
 	cmd := ident(c)
 
 	switch cmd {
@@ -79,7 +83,7 @@ func parseMetaCommand(s *Script, c *parseContext) {
 			case "us":
 				unit = time.Microsecond
 			default:
-				c.fail(fmt.Errorf("\\sleep command must use 'us', 'ms', or 's' unit argument - or none. got: %s", unitStr))
+				c.fail(fmt.Errorf(":sleep command must use 'us', 'ms', or 's' unit argument - or none. got: %s", unitStr))
 			}
 		}
 		s.Commands = append(s.Commands, SleepCommand{

@@ -30,7 +30,9 @@ var fEncryptionMode string
 var fDuration time.Duration
 var fProgress time.Duration
 var fVariables map[string]string
-var fWorkloads []string
+var fBuiltinWorkloads []string
+var fWorkloadFiles []string
+var fWorkloadScripts []string
 var fOutputFormat string
 var fNoCheckCertificates bool
 var fMaxConnLifetime time.Duration
@@ -46,9 +48,13 @@ func init() {
 	pflag.StringVarP(&fEncryptionMode, "encryption", "e", "auto", "whether to use encryption, `auto`, `true` or `false`")
 	pflag.DurationVarP(&fDuration, "duration", "d", 60*time.Second, "duration to run, ex: 15s, 1m, 10h")
 	pflag.StringToStringVarP(&fVariables, "define", "D", nil, "defines variables for workload scripts and query parameters")
-	pflag.StringSliceVarP(&fWorkloads, "workload", "w", []string{"builtin:tpcb-like"}, "path to workload script or builtin:[tpcb-like,ldbc-like]")
 	pflag.BoolVarP(&fLatencyMode, "latency", "l", false, "run in latency testing more rather than throughput mode")
 	pflag.StringVarP(&fOutputFormat, "output", "o", "auto", "output format, `auto`, `interactive` or `csv`")
+
+	// Flags defining the workload to run
+	pflag.StringSliceVarP(&fBuiltinWorkloads, "builtin", "b", []string{}, "built-in workload to run 'tpcb-like' or 'ldbc-like', default is tpcb-like")
+	pflag.StringSliceVarP(&fWorkloadFiles, "file", "f", []string{}, "path to workload script file(s)")
+	pflag.StringArrayVarP(&fWorkloadScripts, "script", "S", []string{}, "script(s) to run, directly specified on the command line")
 
 	// Less common command line vars
 	pflag.DurationVar(&fProgress, "progress", 10*time.Second, "interval to report progress, ex: 15s, 1m, 1h")
@@ -71,6 +77,11 @@ Options:
 	if len(os.Args) == 1 {
 		pflag.Usage()
 		os.Exit(1)
+	}
+
+	// If no workloads at all are specified, we run tpc-b
+	if len(fBuiltinWorkloads) == 0 && len(fWorkloadScripts) == 0 && len(fWorkloadFiles) == 0 {
+		fBuiltinWorkloads = []string{"tpcb-like"}
 	}
 
 	seed := time.Now().Unix()
@@ -128,7 +139,7 @@ Options:
 	}
 
 	if fInitMode {
-		err = initWorkload(fWorkloads, dbName, fScale, seed, driver, out)
+		err = initWorkload(fBuiltinWorkloads, dbName, fScale, seed, driver, out)
 		if err != nil {
 			log.Fatalf("%+v", err)
 		}
@@ -170,30 +181,30 @@ func createWorkload(driver neo4j.Driver, dbName string, variables map[string]int
 	var err error
 	scripts := make([]neobench.Script, 0)
 	csvLoader := neobench.NewCsvLoader()
-	for _, path := range fWorkloads {
-		parts := strings.Split(path, "@")
-		weight := 1.0
-		if len(parts) > 1 {
-			weight, err = strconv.ParseFloat(parts[1], 64)
-			if err != nil {
-				log.Fatalf("Failed to parse weight; value after @ symbol for workload weight must be a number: %s", path)
-			}
-			path = parts[0]
+	for _, rawPath := range fBuiltinWorkloads {
+		path, weight := splitScriptAndWeight(rawPath)
+		builtinScripts, err := loadBuiltinWorkload(path, weight)
+		if err != nil {
+			return neobench.Workload{}, errors.Wrapf(err, "failed to load script '%s'", path)
 		}
+		scripts = append(scripts, builtinScripts...)
+	}
 
-		if strings.HasPrefix(path, "builtin:") {
-			builtinScripts, err := loadBuiltinWorkload(path, weight)
-			if err != nil {
-				return neobench.Workload{}, errors.Wrapf(err, "failed to load script '%s'", path)
-			}
-			scripts = append(scripts, builtinScripts...)
-		} else {
-			script, err := loadScript(driver, dbName, variables, path, weight, csvLoader)
-			if err != nil {
-				return neobench.Workload{}, errors.Wrapf(err, "failed to load script '%s'", path)
-			}
-			scripts = append(scripts, script)
+	for _, rawPath := range fWorkloadFiles {
+		path, weight := splitScriptAndWeight(rawPath)
+		script, err := loadScriptFile(driver, dbName, variables, path, weight, csvLoader)
+		if err != nil {
+			return neobench.Workload{}, errors.Wrapf(err, "failed to load script '%s'", path)
 		}
+		scripts = append(scripts, script)
+	}
+
+	for i, scriptContent := range fWorkloadScripts {
+		script, err := loadScript(driver, dbName, variables, fmt.Sprintf("-S #%d", i), scriptContent, 1.0, csvLoader)
+		if err != nil {
+			return neobench.Workload{}, errors.Wrapf(err, "failed to parse script '%s'", scriptContent)
+		}
+		scripts = append(scripts, script)
 	}
 
 	return neobench.Workload{
@@ -204,14 +215,34 @@ func createWorkload(driver neo4j.Driver, dbName string, variables map[string]int
 	}, err
 }
 
-func loadScript(driver neo4j.Driver, dbName string, vars map[string]interface{}, path string, weight float64,
+// Splits command-line specified scripts-with-weight into script and weight
+//   -f my.script@100 becomes "myscript", 100.0
+//   -b tpcb-like@10 becomes "tpcb-like", 10.0
+func splitScriptAndWeight(raw string) (string, float64) {
+	parts := strings.Split(raw, "@")
+	if len(parts) < 2 {
+		return raw, 1.0
+	}
+	weight, err := strconv.ParseFloat(parts[1], 64)
+	if err != nil {
+		log.Fatalf("Failed to parse weight; value after @ symbol for workload weight must be a number: %s", raw)
+	}
+	return parts[0], weight
+}
+
+func loadScriptFile(driver neo4j.Driver, dbName string, vars map[string]interface{}, path string, weight float64,
 	csvLoader *neobench.CsvLoader) (neobench.Script, error) {
 	scriptContent, err := ioutil.ReadFile(path)
 	if err != nil {
 		return neobench.Script{}, fmt.Errorf("failed to read workload file at %s: %s", path, err)
 	}
 
-	script, err := neobench.Parse(path, string(scriptContent), weight)
+	return loadScript(driver, dbName, vars, path, string(scriptContent), weight, csvLoader)
+}
+
+func loadScript(driver neo4j.Driver, dbName string, vars map[string]interface{}, path, scriptContent string, weight float64,
+	csvLoader *neobench.CsvLoader) (neobench.Script, error) {
+	script, err := neobench.Parse(path, scriptContent, weight)
 	if err != nil {
 		return neobench.Script{}, err
 	}
@@ -222,17 +253,17 @@ func loadScript(driver neo4j.Driver, dbName string, vars map[string]interface{},
 }
 
 func loadBuiltinWorkload(path string, weight float64) ([]neobench.Script, error) {
-	if path == "builtin:tpcb-like" {
+	if path == "tpcb-like" {
 		script, err := neobench.Parse("builtin:tpcp-like", builtin.TPCBLike, weight)
 		return []neobench.Script{script}, err
 	}
 
-	if path == "builtin:match-only" {
+	if path == "match-only" {
 		script, err := neobench.Parse("builtin:match-only", builtin.MatchOnly, weight)
 		return []neobench.Script{script}, err
 	}
 
-	if path == "builtin:ldbc-like" {
+	if path == "ldbc-like" {
 		ic2Rate, ic6Rate, ic10Rate, ic14Rate := 37.0, 129.0, 30.0, 49.0
 		totalRate := ic2Rate + ic6Rate + ic10Rate + ic14Rate
 		ic2, err := neobench.Parse("builtin:ldbc-like/ic2", builtin.LDBCIC2, ic2Rate/totalRate*weight)
@@ -259,22 +290,22 @@ func loadBuiltinWorkload(path string, weight float64) ([]neobench.Script, error)
 		}, err
 	}
 
-	if path == "builtin:ldbc-like/ic2" {
+	if path == "ldbc-like/ic2" {
 		script, err := neobench.Parse("builtin:ldbc-like/ic2", builtin.LDBCIC2, weight)
 		return []neobench.Script{script}, err
 	}
 
-	if path == "builtin:ldbc-like/ic6" {
+	if path == "ldbc-like/ic6" {
 		script, err := neobench.Parse("builtin:ldbc-like/ic6", builtin.LDBCIC6, weight)
 		return []neobench.Script{script}, err
 	}
 
-	if path == "builtin:ldbc-like/ic10" {
+	if path == "ldbc-like/ic10" {
 		script, err := neobench.Parse("builtin:ldbc-like/ic10", builtin.LDBCIC10, weight)
 		return []neobench.Script{script}, err
 	}
 
-	if path == "builtin:ldbc-like/ic14" {
+	if path == "ldbc-like/ic14" {
 		script, err := neobench.Parse("builtin:ldbc-like/ic14", builtin.LDBCIC14, weight)
 		return []neobench.Script{script}, err
 	}
@@ -284,8 +315,14 @@ func loadBuiltinWorkload(path string, weight float64) ([]neobench.Script, error)
 
 func describeScenario() string {
 	out := strings.Builder{}
-	for _, path := range fWorkloads {
-		out.WriteString(fmt.Sprintf(" -w %s", path))
+	for _, path := range fBuiltinWorkloads {
+		out.WriteString(fmt.Sprintf(" -b %s", path))
+	}
+	for _, path := range fWorkloadFiles {
+		out.WriteString(fmt.Sprintf(" -f %s", path))
+	}
+	for _, script := range fWorkloadScripts {
+		out.WriteString(fmt.Sprintf(" -S \"%s\"", script))
 	}
 	out.WriteString(fmt.Sprintf(" -c %d", fClients))
 	out.WriteString(fmt.Sprintf(" -s %d", fScale))
@@ -363,13 +400,13 @@ func collectResults(databaseName, scenario string, out neobench.Output, concurre
 
 func initWorkload(paths []string, dbName string, scale, seed int64, driver neo4j.Driver, out neobench.Output) error {
 	for _, path := range paths {
-		if path == "builtin:tpcb-like" {
+		if path == "tpcb-like" {
 			return builtin.InitTPCBLike(scale, dbName, driver, out)
 		}
-		if path == "builtin:match-only" {
+		if path == "match-only" {
 			return builtin.InitTPCBLike(scale, dbName, driver, out)
 		}
-		if path == "builtin:ldbc-like" {
+		if path == "ldbc-like" {
 			return builtin.InitLDBCLike(scale, seed, dbName, driver, out)
 		}
 	}

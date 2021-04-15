@@ -78,33 +78,33 @@ The variables are available to subsequent meta-commands and as parameters in you
 
 Here is a small example with two meta-commands and one query:
 
-    \set numPeople $scale * 1000000
-    \set personId random() * $numPeople
+    :set numPeople $scale * 1000000
+    :set personId random() * $numPeople
     MATCH (p:Person {id: $personId}) RETURN p;
 
 Scripts are currently ran as a single transaction, though that may change before 1.0.
 
 The following meta-commands are currently supported:
 
-    \set <variable> <expression>
-    ex: \set myParam random() * 1000
+    :set <variable> <expression>
+    ex: :set myParam random() * 1000
     
-    \sleep <expression> <unit>
-    ex: \sleep random() * 60 ms
+    :sleep <expression> <unit>
+    ex: :sleep random() * 60 ms
 
 All expressions supported by pgbench 10 are supported, please see the pgbench docs linked above.
 
 Beyond the pgbench expressions, neobench also supports lists:
 
-    \set myLiteralList [1,2,[3]]
-    \set myRange range(1,10) // inclusive on both sides to match cypher range()
+    :set myLiteralList [1,2,[3]]
+    :set myRange range(1,10) // inclusive on both sides to match cypher range()
 
 For simulating simple bulk-insert operations, there is `random_matrix`.
 This function generates a matrix with each column populated with a random integer in a specified range:
 
     // Generates a 100-row matrix with 3 columns.
     // The first column will have random values between [1,5], the second [1,100] and the third [-10,10].
-    \set myMatrix random_matrix(100, [1, 5], [1, 100], [-10, 10])
+    :set myMatrix random_matrix(100, [1, 5], [1, 100], [-10, 10])
 
 # Contributions
 

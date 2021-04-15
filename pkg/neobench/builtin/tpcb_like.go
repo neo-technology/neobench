@@ -6,10 +6,10 @@ import (
 )
 
 const TPCBLike = `
-\set aid random(1, 100000 * $scale)
-\set bid random(1, 1 * $scale)
-\set tid random(1, 10 * $scale)
-\set delta random(-5000, 5000)
+:set aid random(1, 100000 * $scale)
+:set bid random(1, 1 * $scale)
+:set tid random(1, 10 * $scale)
+:set delta random(-5000, 5000)
 
 MATCH (account:Account {aid:$aid}) 
 SET account.balance = account.balance + $delta;
@@ -21,7 +21,7 @@ CREATE (:History { tid: $tid, bid: $bid, aid: $aid, delta: $delta, mtime: timest
 `
 
 const MatchOnly = `
-\set aid random(1, 100000 * $scale)
+:set aid random(1, 100000 * $scale)
 MATCH (account:Account {aid:$aid}) RETURN account.balance;
 `
 

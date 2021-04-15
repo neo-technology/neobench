@@ -37,9 +37,9 @@ main() {
 test_tpcb_like() {
   setup_db
 
-  "${NEOBENCH_PATH}" -i -p secret -w builtin:tpcb-like -d 5s
-  "${NEOBENCH_PATH}" -i -p secret -w builtin:tpcb-like -d 5s --latency
-  "${NEOBENCH_PATH}" -i -p secret -w builtin:match-only -d 5s
+  "${NEOBENCH_PATH}" -i -p secret -b tpcb-like -d 5s
+  "${NEOBENCH_PATH}" -i -p secret -b tpcb-like -d 5s --latency
+  "${NEOBENCH_PATH}" -i -p secret -b match-only -d 5s
 }
 
 test_named_database() {
@@ -66,24 +66,36 @@ test_named_database() {
 test_custom_script() {
   setup_db
 
-  "${NEOBENCH_PATH}" -p secret -w "${SCRIPTPATH}/write.script" -d 5s --define myvar=12
-  "${NEOBENCH_PATH}" -p secret -w "${SCRIPTPATH}/write.script" -d 5s --define myvar=12 --latency
+  "${NEOBENCH_PATH}" -p secret -f "${SCRIPTPATH}/write.script" -d 5s --define myvar=12
+  "${NEOBENCH_PATH}" -p secret -f "${SCRIPTPATH}/write.script" -d 5s --define myvar=12 --latency
+
+  # Specify custom scripts directly on the command line
+  "${NEOBENCH_PATH}" -p secret -S 'RETURN $myvar' -d 5s --define myvar=12
 }
 
 
 test_csv_parameter() {
   setup_db
+  local out="${TEMP}/csv.out"
 
-  "${NEOBENCH_PATH}" -p secret -w  <(echo "
-\\set data csv(\"${SCRIPTPATH}/data.csv\")
-RETURN $data") -d 1s
+  "${NEOBENCH_PATH}" -p secret -S "
+:set data csv(\"${SCRIPTPATH}/data.csv\")
+RETURN \$data" -d 1s | tee "${out}"
+
+  if ! grep -q "#0" "${out}"; then
+    echo >&2 "Expected #0 in output above"
+    exit 1
+  fi
 }
 
 test_mixed_scripts() {
   setup_db
   local out="${TEMP}/mixed.out"
 
-  "${NEOBENCH_PATH}" -p secret -w "${SCRIPTPATH}/read.script@5" -w "${SCRIPTPATH}/write.script@5" -d 20s --define myvar=12 --latency | tee "${out}"
+  "${NEOBENCH_PATH}" -p secret \
+    -f "${SCRIPTPATH}/read.script@5" \
+    -f "${SCRIPTPATH}/write.script@5" \
+    -d 20s --define myvar=12 --latency | tee "${out}"
 
   if ! grep -q "read.script" "${out}"; then
     echo >&2 "Expected read.script in output above"
@@ -102,17 +114,23 @@ test_error_exit_codes() {
   "${NEOBENCH_PATH}" -p wontwork -d 1s > "${out}" 2>&1 || exitcode="$?"
   if [[ "${exitcode}" != "1" ]]; then
     echo >&2 "Expected command to exit with code 1 if given invalid credentials, got ${exitcode}"
+    echo >&2 "== stdout+stderr =="
+    cat "${out}" >&2
+    echo >&2 "== /stdout+stderr =="
     exit 1
   fi
 
   "${NEOBENCH_PATH}" --no-such-flag > "${out}" 2>&1 || exitcode="$?"
   if [[ "${exitcode}" != "2" ]]; then
     echo >&2 "Expected command to exit with code 2 if given invalid flags, got ${exitcode}"
+    echo >&2 "== stdout+stderr =="
+    cat "${out}" >&2
+    echo >&2 "== /stdout+stderr =="
     exit 1
   fi
 
   # Note the very long timeout as a hacky way to make sure we exit immediately rather than fail after
-  "${NEOBENCH_PATH}" -p wontwork -w "${SCRIPTPATH}/syntaxerror.script" -d 1h > "${out}" 2>&1 || exitcode="$?"
+  "${NEOBENCH_PATH}" -p wontwork -f "${SCRIPTPATH}/syntaxerror.script" -d 1h > "${out}" 2>&1 || exitcode="$?"
   if [[ "${exitcode}" != "1" ]]; then
     echo >&2 "Expected command to exit with code 1 if given syntax error, got ${exitcode}"
     echo >&2 "== stdout+stderr =="

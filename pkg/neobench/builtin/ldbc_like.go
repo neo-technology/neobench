@@ -10,7 +10,7 @@ import (
 )
 
 const LDBCIC2 = `
-\set personId random(1, 9892 * $scale)
+:set personId random(1, 9892 * $scale)
 
 MATCH (:Person {id:{personId}})-[:KNOWS]-(friend),
       (friend)<-[:HAS_CREATOR]-(message)
@@ -26,8 +26,8 @@ LIMIT 20
 `
 
 const LDBCIC6 = `
-\set personId random(1, 9892 * $scale)
-\set tagId random(1, 16080)
+:set personId random(1, 9892 * $scale)
+:set tagId random(1, 16080)
 
 MATCH (knownTag:Tag {name: "Tag-" + $tagId})
 MATCH (person:Person {id:$personId})-[:KNOWS*1..2]-(friend)
@@ -45,8 +45,8 @@ LIMIT 10;
 `
 
 const LDBCIC10 = `
-\set personId random(1, 9892 * $scale)
-\set birthdayMonth random(1, 13)
+:set personId random(1, 9892 * $scale)
+:set birthdayMonth random(1, 13)
 
 MATCH (person:Person {id:$personId})-[:KNOWS*2..2]-(friend),
        (friend)-[:IS_LOCATED_IN]->(city)
@@ -72,8 +72,8 @@ LIMIT 10;
 `
 
 const LDBCIC14 = `
-\set personOne random(1, 9892 * $scale)
-\set personTwo random(1, 9892 * $scale)
+:set personOne random(1, 9892 * $scale)
+:set personTwo random(1, 9892 * $scale)
 
 MATCH path = allShortestPaths((person1:Person {id:$personOne})-[:KNOWS*0..]-(person2:Person {id:$personTwo}))
 RETURN
