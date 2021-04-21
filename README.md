@@ -36,26 +36,30 @@ Alternatively you can build from source by checking out this repo and running `m
     \set accountId random(1, $scale * 1000)
     CREATE (a:Account {aid: $accountId});
     
-    $ neobench -w myworkload.script 
+    $ neobench -f myworkload.script 
 
 # Usage
 
 ```
 Options:
-  -a, --address string          address to connect to, eg. neo4j://mydb:7687 (default "neo4j://localhost:7687")
-  -c, --clients int             number of concurrent clients / sessions (default 1)
-  -D, --define stringToString   defines variables for workload scripts and query parameters (default [])
-  -d, --duration duration       duration to run, ex: 15s, 1m, 10h (default 1m0s)
-  -e, --encryption auto         whether to use encryption, auto, `true` or `false` (default "auto")
-  -i, --init                    when running built-in workloads, run their built-in dataset generator first
-  -l, --latency                 run in latency testing more rather than throughput mode
-  -o, --output auto             output format, auto, `interactive` or `csv` (default "auto")
-  -p, --password string         password (default "neo4j")
-      --progress duration       interval to report progress, ex: 15s, 1m, 1h (default 10s)
-  -r, --rate float              in latency mode (see -l) sets total transactions per second (default 1)
-  -s, --scale scale             sets the scale variable, impact depends on workload (default 1)
-  -u, --user string             username (default "neo4j")
-  -w, --workload strings        path to workload script or builtin:[tpcb-like,ldbc-like] (default [builtin:tpcb-like])
+  -a, --address string               address to connect to (default "neo4j://localhost:7687")
+  -b, --builtin strings              built-in workload to run 'tpcb-like' or 'ldbc-like', default is tpcb-like
+  -c, --clients int                  number of concurrent clients / sessions (default 1)
+  -D, --define stringToString        defines variables for workload scripts and query parameters (default [])
+  -d, --duration duration            duration to run, ex: 15s, 1m, 10h (default 1m0s)
+  -e, --encryption auto              whether to use encryption, auto, `true` or `false` (default "auto")
+  -f, --file strings                 path to workload script file(s)
+  -i, --init                         when running built-in workloads, run their built-in dataset generator first
+  -l, --latency                      run in latency testing more rather than throughput mode
+      --max-conn-lifetime duration   when connections are older than this, they are ejected from the connection pool (default 1h0m0s)
+      --no-check-certificates        disable TLS certificate validation, exposes your credentials to anyone on the network
+  -o, --output auto                  output format, auto, `interactive` or `csv` (default "auto")
+  -p, --password string              password (default "neo4j")
+      --progress duration            interval to report progress, ex: 15s, 1m, 1h (default 10s)
+  -r, --rate float                   in latency mode (see -l) sets total transactions per second (default 1)
+  -s, --scale scale                  sets the scale variable, impact depends on workload (default 1)
+  -S, --script stringArray           script(s) to run, directly specified on the command line
+  -u, --user string                  username (default "neo4j")
 ```
 
 # Exit codes
