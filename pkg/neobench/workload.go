@@ -2,13 +2,14 @@ package neobench
 
 import (
 	"fmt"
-	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
-	"github.com/pkg/errors"
 	"io"
 	"math/rand"
 	"os"
 	"sort"
 	"time"
+
+	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
+	"github.com/pkg/errors"
 )
 
 // Useful for creating sharded workloads or other logic that tie in session-esque concepts
@@ -111,11 +112,13 @@ type Script struct {
 // Context that scripts are executed in; these are not thread safe, and are re-created on each script
 // invocation, so need to be kept lightish.
 type ScriptContext struct {
-	Script    Script
-	Stderr    io.Writer
-	Vars      map[string]interface{}
-	Rand      *rand.Rand
-	CsvLoader *CsvLoader
+	// Set true to skip sleeps and other things that should not execute during preflights
+	PreflightMode bool
+	Script        Script
+	Stderr        io.Writer
+	Vars          map[string]interface{}
+	Rand          *rand.Rand
+	CsvLoader     *CsvLoader
 }
 
 // Evaluate this script in the given context
@@ -230,6 +233,11 @@ func (c SleepCommand) Execute(ctx *ScriptContext, uow *UnitOfWork) error {
 	if !ok {
 		return fmt.Errorf("\\sleep must be given an integer expression, got %v", sleepNumber)
 	}
+
+	if ctx.PreflightMode {
+		return nil
+	}
+
 	time.Sleep(time.Duration(sleepInt) * c.Unit)
 	return nil
 }
@@ -242,15 +250,16 @@ func WorkloadPreflight(driver neo4j.Driver, dbName string, script Script, vars m
 		DatabaseName: dbName,
 	})
 	defer session.Close()
-  
+
 	r := rand.New(rand.NewSource(1337))
 
 	unitOfWork, err := script.Eval(ScriptContext{
-		Script:    script,
-		Stderr:    os.Stderr,
-		Vars:      createVars(vars, 0),
-		Rand:      r,
-		CsvLoader: csvLoader,
+		PreflightMode: true,
+		Script:        script,
+		Stderr:        os.Stderr,
+		Vars:          createVars(vars, 0),
+		Rand:          r,
+		CsvLoader:     csvLoader,
 	})
 	if err != nil {
 		return false, err

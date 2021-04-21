@@ -35,6 +35,7 @@ main() {
 }
 
 test_tpcb_like() {
+  echo "Running test_tpcb_like.."
   setup_db
 
   "${NEOBENCH_PATH}" -i -p secret -b tpcb-like -d 5s
@@ -43,6 +44,7 @@ test_tpcb_like() {
 }
 
 test_named_database() {
+  echo "Running test_named_database.."
   setup_db
 
   local out="${TEMP}/named.out"
@@ -64,6 +66,7 @@ test_named_database() {
 }
 
 test_custom_script() {
+  echo "Running test_custom_script.."
   setup_db
 
   "${NEOBENCH_PATH}" -p secret -f "${SCRIPTPATH}/write.script" -d 5s --define myvar=12
@@ -75,6 +78,7 @@ test_custom_script() {
 
 
 test_csv_parameter() {
+  echo "Running test_csv_parameter.."
   setup_db
   local out="${TEMP}/csv.out"
 
@@ -89,6 +93,7 @@ RETURN \$data" -d 1s | tee "${out}"
 }
 
 test_mixed_scripts() {
+  echo "Running test_mixed_scripts.."
   setup_db
   local out="${TEMP}/mixed.out"
 
@@ -108,6 +113,7 @@ test_mixed_scripts() {
 }
 
 test_error_exit_codes() {
+  echo "Running test_error_exit_codes.."
   local exitcode
   local out="${TEMP}/exit.out"
 
@@ -130,7 +136,18 @@ test_error_exit_codes() {
   fi
 
   # Note the very long timeout as a hacky way to make sure we exit immediately rather than fail after
-  "${NEOBENCH_PATH}" -p wontwork -f "${SCRIPTPATH}/syntaxerror.script" -d 1h > "${out}" 2>&1 || exitcode="$?"
+  "${NEOBENCH_PATH}" -p secret -f "${SCRIPTPATH}/syntaxerror.script" -d 1h > "${out}" 2>&1 || exitcode="$?"
+  if [[ "${exitcode}" != "1" ]]; then
+    echo >&2 "Expected command to exit with code 1 if given syntax error, got ${exitcode}"
+    echo >&2 "== stdout+stderr =="
+    cat "${out}" >&2
+    echo >&2 "== /stdout+stderr =="
+    exit 1
+  fi
+
+  # This script has a *very* long client-side sleep, which should not get executed before the preflight
+  # mode detects the syntax error
+  "${NEOBENCH_PATH}" -p secret -S ":sleep 1000000 s\nthisisasyntaxerror;" -d 1h > "${out}" 2>&1 || exitcode="$?"
   if [[ "${exitcode}" != "1" ]]; then
     echo >&2 "Expected command to exit with code 1 if given syntax error, got ${exitcode}"
     echo >&2 "== stdout+stderr =="
