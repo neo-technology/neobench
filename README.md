@@ -36,13 +36,13 @@ Alternatively you can build from source by checking out this repo and running `m
     \set accountId random(1, $scale * 1000)
     CREATE (a:Account {aid: $accountId});
     
-    $ neobench -w myworkload.script 
+    $ neobench -f myworkload.script 
 
 # Usage
 
 ```
 Options:
-  -a, --address string          address to connect to, eg. neo4j://mydb:7687 (default "neo4j://localhost:7687")
+  -a, --address string          address to connect to (default "neo4j://localhost:7687")
   -c, --clients int             number of concurrent clients / sessions (default 1)
   -D, --define stringToString   defines variables for workload scripts and query parameters (default [])
   -d, --duration duration       duration to run, ex: 15s, 1m, 10h (default 1m0s)
@@ -54,6 +54,7 @@ Options:
       --progress duration       interval to report progress, ex: 15s, 1m, 1h (default 10s)
   -r, --rate float              in latency mode (see -l) sets total transactions per second (default 1)
   -s, --scale scale             sets the scale variable, impact depends on workload (default 1)
+      --tracing string          set to 'jaeger' to enable Jaeger open tracing
   -u, --user string             username (default "neo4j")
   -w, --workload strings        path to workload script or builtin:[tpcb-like,ldbc-like] (default [builtin:tpcb-like])
 ```
