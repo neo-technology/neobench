@@ -269,6 +269,29 @@ RETURN {sent} + $alsoSent`+" + {`quotedSent`};", 1)
 	}, uow.Statements)
 }
 
+// This allows emulating large volumes of distinct query strings, using raw template substitution
+func TestClientSideParams(t *testing.T) {
+	vars := map[string]interface{}{"scale": int64(1)}
+	script, err := Parse("sleep", `
+:set clientSide 7331
+:set serverSide 1337
+
+RETURN {serverSide} + $$clientSide`, 1)
+
+	assert.NoError(t, err)
+	uow, err := script.Eval(ScriptContext{
+		Vars: vars,
+		Rand: rand.New(rand.NewSource(1337)),
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, []Statement{
+		{
+			Query:  "RETURN {serverSide} + 7331",
+			Params: map[string]interface{}{"serverSide": int64(1337)},
+		},
+	}, uow.Statements)
+}
+
 // Partially a regression test for a parser bug in list comprehensions, but covers multi-statement scripts
 func TestMultiQuery(t *testing.T) {
 	vars := map[string]interface{}{"scale": int64(1), "ids": []interface{}{1}}

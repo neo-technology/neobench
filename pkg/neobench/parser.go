@@ -106,15 +106,20 @@ func command(c *parseContext) Command {
 		b.WriteString(content)
 	}
 	query := b.String()
+
+	remoteParams, localParams := parseParams(query, c.s.Filename)
+
 	return QueryCommand{
-		Query:  query,
-		Params: parseParams(query, c.s.Filename),
+		Query:        query,
+		RemoteParams: remoteParams,
+		LocalParams:  localParams,
 	}
 }
 
 // Extract a list of parameters used in a given query string
-func parseParams(query, filename string) []string {
-	params := make(map[string]bool)
+func parseParams(query, filename string) ([]string, []string) {
+	localParams := make(map[string]bool)
+	remoteParams := make(map[string]bool)
 	c := newParseContext(query, filename)
 	for !c.done {
 		tok := c.PeekToken()
@@ -123,7 +128,13 @@ func parseParams(query, filename string) []string {
 		} else if tok == '$' {
 			c.Next()
 			if name, err := tryIdent(c); err == nil {
-				params[name] = true
+				remoteParams[name] = true
+			} else if c.PeekToken() == '$' {
+				c.Next()
+				// $$ means locally substituted parameter
+				if name, err := tryIdent(c); err == nil {
+					localParams[name] = true
+				}
 			}
 		} else if tok == '{' {
 			// '{' is ambiguous; we specifically want the pattern ['{', IDENT, '}']
@@ -137,16 +148,20 @@ func parseParams(query, filename string) []string {
 				// "{ IDENT", but the next token isn't }
 				continue
 			}
-			params[name] = true
+			remoteParams[name] = true
 		}
 		c.Next()
 	}
 
-	out := make([]string, 0, len(params))
-	for k := range params {
-		out = append(out, k)
+	outRemoteParams := make([]string, 0, len(remoteParams))
+	for k := range remoteParams {
+		outRemoteParams = append(outRemoteParams, k)
 	}
-	return out
+	outLocalParams := make([]string, 0, len(localParams))
+	for k := range localParams {
+		outLocalParams = append(outLocalParams, k)
+	}
+	return outRemoteParams, outLocalParams
 }
 
 func ident(c *parseContext) string {

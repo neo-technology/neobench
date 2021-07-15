@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
@@ -190,19 +191,50 @@ type Command interface {
 type QueryCommand struct {
 	Query string
 	// Parameters used in the above query
-	Params []string
+	RemoteParams []string
+	// Locally substituted parameters
+	LocalParams []string
 }
 
 func (c QueryCommand) Execute(ctx *ScriptContext, uow *UnitOfWork) error {
 	params := make(map[string]interface{})
-	for _, pname := range c.Params {
+	for _, pname := range c.RemoteParams {
 		params[pname] = ctx.Vars[pname]
 	}
+	query := c.Query
+	if len(c.LocalParams) > 0 {
+		for _, pname := range c.LocalParams {
+			literal, err := varToCypherLiteral(ctx.Vars[pname])
+			if err != nil {
+				return errors.Wrapf(err, "don't yet know how to convert $$%s (%v) to a cypher literal string", pname, ctx.Vars[pname])
+			}
+			query = strings.ReplaceAll(query, fmt.Sprintf("$$%s", pname), literal)
+		}
+	}
 	uow.Statements = append(uow.Statements, Statement{
-		Query:  c.Query,
+		Query:  query,
 		Params: params,
 	})
 	return nil
+}
+
+func varToCypherLiteral(v interface{}) (string, error) {
+	switch v := v.(type) {
+	case int, int32, int64:
+		return fmt.Sprintf("%d", v), nil
+	case float32, float64:
+		return fmt.Sprintf("%f", v), nil
+	case bool:
+		if v {
+			return "true", nil
+		} else {
+			return "false", nil
+		}
+	case string:
+		return fmt.Sprintf("\"%s\"", v), nil // TODO escaping
+	default:
+		return "", fmt.Errorf("don't know how to convert %v to cypher literal", v)
+	}
 }
 
 type SetCommand struct {
