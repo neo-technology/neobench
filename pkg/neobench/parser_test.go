@@ -84,12 +84,14 @@ func TestSleepDuration(t *testing.T) {
 func TestExpressions(t *testing.T) {
 	tc := map[string]interface{}{
 		// Scalars
-		"0":           int64(0),
-		"-0":          int64(-0),
-		"1":           int64(1),
-		"9999999000":  int64(9999999000),
-		"-9999999000": int64(-9999999000),
-		"\"Hello\"":   "Hello",
+		"0":                     int64(0),
+		"-0":                    int64(-0),
+		"1":                     int64(1),
+		"9999999000":            int64(9999999000),
+		"-9999999000":           int64(-9999999000),
+		"\"Hello\"":             "Hello",
+		"\"Hello\" + 123":       "Hello123",
+		"123 + \"Hello\" + 123": "123Hello123",
 
 		// Composites
 		"[1, 2, [3]]":    []interface{}{int64(1), int64(2), []interface{}{int64(3)}},

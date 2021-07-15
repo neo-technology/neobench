@@ -942,19 +942,44 @@ func (f CallExpr) Eval(ctx *ScriptContext) (interface{}, error) {
 
 		return a.iVal % b.iVal, nil
 	case "+":
-		a, err := f.argAsNumber(0, ctx)
+		// If any arg is string, we do concatenation
+		a, err := f.args[0].Eval(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+			return nil, errors.Wrapf(err, "in %s", f.String())
 		}
-		b, err := f.argAsNumber(1, ctx)
+		b, err := f.args[1].Eval(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("in %s: %s", f.String(), err)
+			return nil, errors.Wrapf(err, "in %s", f.String())
 		}
 
-		if a.isDouble || b.isDouble {
-			return a.val + b.val, nil
+		_, aIsString := a.(string)
+		_, bIsString := b.(string)
+
+		if aIsString || bIsString {
+			aStr, err := toString(a)
+			if err != nil {
+				return "", errors.Wrapf(err, "don't know how to concat '%v' to string", a)
+			}
+			bStr, err := toString(b)
+			if err != nil {
+				return "", errors.Wrapf(err, "don't know how to concat '%v' to string", b)
+			}
+			return aStr + bStr, nil
+		}
+
+		aNum, err := asNumber(a)
+		if err != nil {
+			return nil, errors.Wrapf(err, "in %s", f.String())
+		}
+		bNum, err := asNumber(b)
+		if err != nil {
+			return nil, errors.Wrapf(err, "in %s", f.String())
+		}
+
+		if aNum.isDouble || bNum.isDouble {
+			return aNum.val + bNum.val, nil
 		} else {
-			return a.iVal + b.iVal, nil
+			return aNum.iVal + bNum.iVal, nil
 		}
 	case "-":
 		a, err := f.argAsNumber(0, ctx)
@@ -973,6 +998,23 @@ func (f CallExpr) Eval(ctx *ScriptContext) (interface{}, error) {
 		}
 	default:
 		return nil, fmt.Errorf("unknown function: %s", f.String())
+	}
+}
+
+func toString(val interface{}) (string, error) {
+	switch val.(type) {
+	case string:
+		return val.(string), nil
+	case int, int32, int64:
+		return fmt.Sprintf("%d", val), nil
+	case bool:
+		if val.(bool) {
+			return "true", nil
+		} else {
+			return "false", nil
+		}
+	default:
+		return "", fmt.Errorf("don't know how to convert '%v' to string", val)
 	}
 }
 
