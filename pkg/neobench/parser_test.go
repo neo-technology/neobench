@@ -277,8 +277,9 @@ func TestClientSideParams(t *testing.T) {
 	script, err := Parse("sleep", `
 :set clientSide 7331
 :set serverSide 1337
+:set clientSideList [ i in range(1,2) | "hello" + $i ]
 
-RETURN {serverSide} + $$clientSide`, 1)
+RETURN {serverSide} + $$clientSide, $$clientSideList`, 1)
 
 	assert.NoError(t, err)
 	uow, err := script.Eval(ScriptContext{
@@ -288,7 +289,7 @@ RETURN {serverSide} + $$clientSide`, 1)
 	assert.NoError(t, err)
 	assert.Equal(t, []Statement{
 		{
-			Query:  "RETURN {serverSide} + 7331",
+			Query:  "RETURN {serverSide} + 7331, [\"hello1\", \"hello2\"]",
 			Params: map[string]interface{}{"serverSide": int64(1337)},
 		},
 	}, uow.Statements)

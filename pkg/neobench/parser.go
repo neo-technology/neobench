@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/rand"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"text/scanner"
@@ -109,6 +110,13 @@ func command(c *parseContext) Command {
 
 	remoteParams, localParams := parseParams(query, c.s.Filename)
 
+	// We do literal replacement of the local params, so sort them by string length,
+	// otherwise a param that is a substring of another may jumble stuff ($$a would get
+	// substituted into $$ananas)
+	sort.Slice(localParams, func(i, j int) bool {
+		return len(localParams[i]) > len(localParams[j])
+	})
+
 	return QueryCommand{
 		Query:        query,
 		RemoteParams: remoteParams,
@@ -161,6 +169,7 @@ func parseParams(query, filename string) ([]string, []string) {
 	for k := range localParams {
 		outLocalParams = append(outLocalParams, k)
 	}
+
 	return outRemoteParams, outLocalParams
 }
 

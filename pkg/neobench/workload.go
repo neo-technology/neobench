@@ -232,6 +232,21 @@ func varToCypherLiteral(v interface{}) (string, error) {
 		}
 	case string:
 		return fmt.Sprintf("\"%s\"", v), nil // TODO escaping
+	case []interface{}:
+		var sb strings.Builder
+		sb.WriteString("[")
+		for i, e := range v {
+			eLit, err := varToCypherLiteral(e)
+			if err != nil {
+				return "", err
+			}
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(eLit)
+		}
+		sb.WriteString("]")
+		return sb.String(), nil
 	default:
 		return "", fmt.Errorf("don't know how to convert %v to cypher literal", v)
 	}
