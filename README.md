@@ -1,3 +1,6 @@
+
+<p align="center"><img src="/demo.gif?raw=true"/></p>
+
 # neobench
 
 Scriptable Neo4j benchmarks. Neobench helps you create and run artificial load to tune your Neo4j deployments.
@@ -55,7 +58,7 @@ Then, write one or more script files, one for each transaction type you want to 
     ' > myTransaction.script
     
     $ neobench --address neo4j://localhost:7687 --password secret \
-        --file myworkload.script  
+        --file myTransaction.script  
 
 ## Exit codes
 
