@@ -144,8 +144,11 @@ func TestExpressions(t *testing.T) {
 		"[ i in range(1,3) | $i ]": []interface{}{int64(1), int64(2), int64(3)},
 
 		// Functions
-		"abs(-17)":                       int64(17),
-		"abs(-17.6)":                     17.6,
+		"abs(-17)":   int64(17),
+		"abs(-17.6)": 17.6,
+		"csv(\"/data.csv\")": []interface{}{
+			[]interface{}{"row1", int64(1), 1.3},
+			[]interface{}{"row2", int64(2), 1.0}},
 		"double(5432)":                   float64(5432),
 		"double(5432.0)":                 float64(5432),
 		"greatest(5, 4, 3, 2)":           int64(5),
@@ -162,14 +165,11 @@ func TestExpressions(t *testing.T) {
 		"random(1, 5)":                   int64(3),
 		"random_gaussian(1, 10, 2.5)":    int64(3),
 		"random_exponential(1, 10, 2.5)": int64(4),
-		"sqrt(2.0)":                      1.414213562,
 		"range(1, 5)":                    []interface{}{int64(1), int64(2), int64(3), int64(4), int64(5)},
 		"random_matrix(2, [1,5], [5,8])": []interface{}{
 			[]interface{}{int64(3), int64(5)},
 			[]interface{}{int64(1), int64(5)}},
-		"csv(\"/data.csv\")": []interface{}{
-			[]interface{}{"row1", int64(1), 1.3},
-			[]interface{}{"row2", int64(2), 1.0}},
+		"sqrt(2.0)": 1.414213562,
 	}
 
 	for expr, expected := range tc {
@@ -279,7 +279,7 @@ func TestClientSideParams(t *testing.T) {
 :set serverSide 1337
 :set clientSideList [ i in range(1,2) | "hello" + $i ]
 
-RETURN {serverSide} + $$clientSide, $$clientSideList`, 1)
+RETURN $serverSide + {serverSide} + $$clientSide, $$clientSideList`, 1)
 
 	assert.NoError(t, err)
 	uow, err := script.Eval(ScriptContext{

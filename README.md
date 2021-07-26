@@ -1,89 +1,84 @@
-# neobench - scriptable Neo4j benchmarks
+# neobench
 
-neobench helps you tune your Neo4j deployment by letting you run custom workloads. 
-You can explore how changing the database and server tuning changes throughput and latency.
+Scriptable Neo4j benchmarks. Neobench helps you create and run artificial load to tune your Neo4j deployments.
 
-It is heavily inspired by [pgbench](https://www.postgresql.org/docs/10/pgbench.html), and uses a similar scripting language.
-Neobench even ships with a default "tpcb-like" workload!
+## Features
 
-# Warning: Pre-Release State!
+- Benchmark throughput and latency
+- Output in easy-to-process CSV
+- Configurable concurrency
+- Allows mixed workloads
+- Built-in TPC-B and LDBC SNB benchmarking modes
+- Scripting language for arbitrary synthetic load
+
+## Warning: Pre-Release
 
 Please note that this is not yet stable. 
 Specifically the command line option naming is likely to change, as is the default workload.
 
 Please do not compare benchmark results from different versions of this tool until - at the earliest - version 1.0.0.
 
-# Installation
+## Installation
 
-You can download pre-built binaries from the "assets" section in the latest release [here](https://github.com/jakewins/neobench/releases).
+### Option 1: Prebuilt binary
 
-The command is also available in dockerhub, so you can run it directly as a docker workload.
-See `docker run jjdh/neobench -h`, usage is identical to the cli command.
+You can download download binaries the "assets" section in the latest release [here](https://github.com/jakewins/neobench/releases).
 
-Alternatively you can build from source by checking out this repo and running `make`, or even just `go build .` if you'd rather skip integration tests.
+### Option 2: Run via docker
 
-# Minimum examples
+    docker run jjdh/neobench -h
 
-    # Run the "TPCB-like" workload for 60 seconds against the default url, neo4j://localhost:7687
-    # in throughput testing mode and with one single worker / session
-    $ neobench -d 60s
-    
-    # Same as above, except measure latency instead of throughput and with concurrent load
-    $ neobench --latency --clients 4
-    
-    # Run a throughput test with a custom workload
-    $ cat myworkload.script
-    \set accountId random(1, $scale * 1000)
+## Usage
+
+Run `neobench -h` for a list of available options.
+
+### Basic usage
+
+    # Run the default, "TPC-B-like", benchmark in latency-testing mode, at a rate of 10 tx/s.
+    # And, before running the benchmark, run the built-in dataset populator for TPC-B (--init)
+    $ neobench --address neo4j://localhost:7687 --password secret \
+        --init \
+        --latency --rate 10 
+
+### Running a custom workload
+
+There is no built-in dataset population system for custom workloads. We recommend using your existing database if you 
+have one, or writing a separate python script to populate your database. 
+
+Then, write one or more script files, one for each transaction type you want to include, and ask neobench to run it.
+
+    # Pick a random number between 1, 1000, and include that as the $accountId parameter,
+    # Then run the specified query. 
+    $ echo '
+    :set accountId random(1, 1000)
     CREATE (a:Account {aid: $accountId});
+    ' > myTransaction.script
     
-    $ neobench -f myworkload.script 
+    $ neobench --address neo4j://localhost:7687 --password secret \
+        --file myworkload.script  
 
-# Usage
-
-```
-Options:
-  -a, --address string               address to connect to (default "neo4j://localhost:7687")
-  -b, --builtin strings              built-in workload to run 'tpcb-like' or 'ldbc-like', default is tpcb-like
-  -c, --clients int                  number of concurrent clients / sessions (default 1)
-  -D, --define stringToString        defines variables for workload scripts and query parameters (default [])
-  -d, --duration duration            duration to run, ex: 15s, 1m, 10h (default 1m0s)
-  -e, --encryption auto              whether to use encryption, auto, `true` or `false` (default "auto")
-  -f, --file strings                 path to workload script file(s)
-  -i, --init                         when running built-in workloads, run their built-in dataset generator first
-  -l, --latency                      run in latency testing more rather than throughput mode
-      --max-conn-lifetime duration   when connections are older than this, they are ejected from the connection pool (default 1h0m0s)
-      --no-check-certificates        disable TLS certificate validation, exposes your credentials to anyone on the network
-  -o, --output auto                  output format, auto, `interactive` or `csv` (default "auto")
-  -p, --password string              password (default "neo4j")
-      --progress duration            interval to report progress, ex: 15s, 1m, 1h (default 10s)
-  -r, --rate float                   in latency mode (see -l) sets total transactions per second (default 1)
-  -s, --scale scale                  sets the scale variable, impact depends on workload (default 1)
-  -S, --script stringArray           script(s) to run, directly specified on the command line
-  -u, --user string                  username (default "neo4j")
-```
-
-# Exit codes
+## Exit codes
 
 Exit code is 2 for invalid usage.
 Exit code is 1 for failure during run. 
 
-# Custom scripts
+## Scripting language
 
-I aspire to support the same language as pgbench. 
+The language is heavily inspired by the scripting language used by pgbench.
 See the "Custom Scripts" section in the [pgbench documentation](https://www.postgresql.org/docs/10/pgbench.html) for details and inspiration.
 
 A workload script consists of `commands`. 
 Each command is either a Cypher statement or a "meta-command".
-Meta-commands start with a backslash and end at the newline.
-Cypher statements can span multiple lines, and end with a semi colon.
+Meta-commands start with a colon and end at the newline.
+Cypher statements can span multiple lines, and end with a semi-colon.
 
 Meta-commands generally introduce variables. 
 The variables are available to subsequent meta-commands and as parameters in your queries. 
 
 Here is a small example with two meta-commands and one query:
 
-    :set numPeople $scale * 1000000
-    :set personId random() * $numPeople
+    :set numPeople 1000000
+    :set personId random(1, $numPeople)
     MATCH (p:Person {id: $personId}) RETURN p;
 
 Scripts are currently ran as a single transaction, though that may change before 1.0.
@@ -96,19 +91,66 @@ The following meta-commands are currently supported:
     :sleep <expression> <unit>
     ex: :sleep random() * 60 ms
 
-All expressions supported by pgbench 10 are supported, please see the pgbench docs linked above.
+### Expressions
 
-Beyond the pgbench expressions, neobench also supports lists:
+You use expressions to set variable values in your script files, for instance:
 
-    :set myLiteralList [1,2,[3]]
-    :set myRange range(1,10) // inclusive on both sides to match cypher range()
+    :set myVar [1, 2, random(1, 10)]
 
-For simulating simple bulk-insert operations, there is `random_matrix`.
-This function generates a matrix with each column populated with a random integer in a specified range:
+Each time this meta-command executes, `$myVar` will be set to a list of `[1, 2, <random number between 1-10>]`.
+If $myVar is used in a subsequent query, the value will be sent to Neo4j as a parameter.
 
-    // Generates a 100-row matrix with 3 columns.
-    // The first column will have random values between [1,5], the second [1,100] and the third [-10,10].
-    :set myMatrix random_matrix(100, [1, 5], [1, 100], [-10, 10])
+#### Basics
+
+- Integers (`0`, `-10`, `-99999990`)
+- Floats (`0.0`, `13.37`)
+- Arithmethic (`1 + 1`, `(1 * 3) - 37`)
+- Strings (`"hello"`, `""`)
+- Lists (`[1,2,3]`)
+- Maps (`{a: 1, b: 2}`)
+
+### List comprehensions
+
+Very useful for generating collections of artificial data. 
+List comprehensions in neobench use the same syntax as list comprehension in Neo4j:
+
+    [ <variable> in <source> | <expression> ]
+    
+For example
+
+    [ i in range(1, 1000) | { uid: $i, email: $i + "@gmail.com" } ]
+
+### Functions
+
+- abs
+  - `abs(v: int) -> int`
+  - Get the absolute (positive) value of the given integer.
+- csv
+  - `csv(path: string) -> list`
+  - Load a csv file from disk. Path is relative to the script files location.
+- len
+  - `len(v: list) -> int`
+  - Get number of items in the argument.
+- pi
+  - `pi() -> float`
+  - It's pi!
+- random
+  - `random(min: int, max: int) -> int`
+  - Uniform pseudo-random integer in the given range. Range is inclusive of both parameters.
+- random_gaussian
+  - `random_gaussian(min: int, max: int, param: float) -> int`
+  - Gaussian-distributed random integer in the given range, with param shaping the curve. 
+    See pgbenchs documentation for the param value, as this implementation mirrors that.
+- random_exponential
+  - `random_exponential(min: int, max: int, param: float) -> int`
+  - Exponentially-distributed random integer in the given range, with param shaping the curve. 
+    See pgbenchs documentation for the param value, as this implementation mirrors that.
+- range
+  - `range(min: int, max: int) -> list`
+  - Generate a list starting at `min` and ending at `max`.
+- sqrt
+  - `sqrt(v: float) -> float`
+  - Get the square root of the argument. 
 
 # Contributions
 
