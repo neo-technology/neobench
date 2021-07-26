@@ -86,10 +86,10 @@ Scripts are currently ran as a single transaction, though that may change before
 The following meta-commands are currently supported:
 
     :set <variable> <expression>
-    ex: :set myParam random() * 1000
+    ex: :set myParam random(1, 1000)
     
     :sleep <expression> <unit>
-    ex: :sleep random() * 60 ms
+    ex: :sleep random(0, 60) ms
 
 ### Expressions
 
@@ -118,7 +118,7 @@ List comprehensions in neobench use the same syntax as list comprehension in Neo
     
 For example
 
-    [ i in range(1, 1000) | { uid: $i, email: $i + "@gmail.com" } ]
+    [ i in range(1, 10) | { uid: $i, email: $i + "@gmail.com" } ]
 
 ### Functions
 
