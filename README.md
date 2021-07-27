@@ -60,6 +60,27 @@ Then, write one or more script files, one for each transaction type you want to 
     $ neobench --address neo4j://localhost:7687 --password secret \
         --file myTransaction.script  
 
+## Benchmarking modes
+
+Neobench does not measure both throughput and latency together; you must pick to measure one or the other.
+The reason for this is to avoid [Coordinated Omission](http://highscalability.com/blog/2015/10/5/your-load-generator-is-probably-lying-to-you-take-the-red-pi.html).
+
+You can choose to get a human-friendly report or a CSV report using the `--output` option.
+By default neobench uses the human-friendly report for interactive shells and csv otherwise.
+
+### Throughput mode
+
+The default. 
+Neobench executes the workload as quickly as the database can handle it, and reports throughput.
+
+### Latency mode (`--latency`)
+
+To measure latency, neobench runs at a set throughput rate, and reports the latency percentiles.
+By default the rate is 1 transaction per second, changeable via the `--rate` flag.
+
+Note that, just like in the real world, if your throughput is set faster than the database can handle it, reported latencies will grow without bound.
+This happens because users requests have to queue behind one another, so user-perceived latency grows much larger than just the time spent processing the query.
+
 ## Exit codes
 
 Exit code is 2 for invalid usage.
@@ -67,16 +88,12 @@ Exit code is 1 for failure during run.
 
 ## Scripting language
 
-The language is heavily inspired by the scripting language used by pgbench.
-See the "Custom Scripts" section in the [pgbench documentation](https://www.postgresql.org/docs/10/pgbench.html) for details and inspiration.
+The language is based on the language used by [pgbench](https://www.postgresql.org/docs/10/pgbench.html).
 
-A workload script consists of `commands`. 
-Each command is either a Cypher statement or a "meta-command".
+A script defines a database transaction to be executed.
+It contains one or more cypher queries, and can optionally contain "meta-commands".
 Meta-commands start with a colon and end at the newline.
 Cypher statements can span multiple lines, and end with a semi-colon.
-
-Meta-commands generally introduce variables. 
-The variables are available to subsequent meta-commands and as parameters in your queries. 
 
 Here is a small example with two meta-commands and one query:
 
@@ -84,19 +101,19 @@ Here is a small example with two meta-commands and one query:
     :set personId random(1, $numPeople)
     MATCH (p:Person {id: $personId}) RETURN p;
 
-Scripts are currently ran as a single transaction, though that may change before 1.0.
-
 The following meta-commands are currently supported:
 
     :set <variable> <expression>
-    ex: :set myParam random(1, 1000)
+    # sets <variable> to <expression>, re-evaluated each time the script is ran
+    # ex: :set myParam random(1, 1000)
     
     :sleep <expression> <unit>
-    ex: :sleep random(0, 60) ms
+    # pause the script execution
+    # ex: :sleep random(0, 60) ms
 
 ### Expressions
 
-You use expressions to set variable values in your script files, for instance:
+Expressions are used in meta-commands, primarily to set variable values.
 
     :set myVar [1, 2, random(1, 10)]
 
@@ -108,19 +125,20 @@ If $myVar is used in a subsequent query, the value will be sent to Neo4j as a pa
 - Integers (`0`, `-10`, `-99999990`)
 - Floats (`0.0`, `13.37`)
 - Arithmethic (`1 + 1`, `(1 * 3) - 37`)
-- Strings (`"hello"`, `""`)
+- Strings (`"hello"`, `""`, `"foo" + "bar"`)
 - Lists (`[1,2,3]`)
 - Maps (`{a: 1, b: 2}`)
 
 ### List comprehensions
 
-Very useful for generating collections of artificial data. 
+Useful for generating collections of artificial data. 
 List comprehensions in neobench use the same syntax as list comprehension in Neo4j:
 
     [ <variable> in <source> | <expression> ]
     
 For example
 
+    # Generate 10 maps with an incrementing `uid` and an `email`
     [ i in range(1, 10) | { uid: $i, email: $i + "@gmail.com" } ]
 
 ### Functions
