@@ -37,21 +37,19 @@ Run `neobench -h` for a list of available options.
 
 ### Basic usage
 
-    # Run the default, "TPC-B-like", benchmark in latency-testing mode, at a rate of 10 tx/s.
-    # And, before running the benchmark, run the built-in dataset populator for TPC-B (--init)
+    # Run the built-in "TPC-B-like" benchmark in throughput testing mode.
+    # Before running the benchmark, run the built-in dataset populator for TPC-B (--init)
     $ neobench --address neo4j://localhost:7687 --password secret \
-        --init \
-        --latency --rate 10 
+        --builtin tpcb-like --init
 
 ### Running a custom workload
 
-There is no built-in dataset population system for custom workloads. We recommend using your existing database if you 
-have one, or writing a separate python script to populate your database. 
+There is no dataset population system for custom workloads. 
+We recommend using your existing database if you have one, or writing a separate python script to populate your database. 
 
-Then, write one or more script files, one for each transaction type you want to include, and ask neobench to run it.
+Write one or more script files, one for each transaction type you want to include, and ask neobench to run it.
 
-    # Pick a random number between 1, 1000, and include that as the $accountId parameter,
-    # Then run the specified query. 
+    # Set $accountId to a random number between 1 and 1000, and then run the query
     $ echo '
     :set accountId random(1, 1000)
     CREATE (a:Account {aid: $accountId});
@@ -62,7 +60,7 @@ Then, write one or more script files, one for each transaction type you want to 
 
 ## Benchmarking modes
 
-Neobench does not measure both throughput and latency together; you must pick to measure one or the other.
+Neobench does not measure both throughput and latency together; you must choose to measure one or the other.
 The reason for this is to avoid [Coordinated Omission](http://highscalability.com/blog/2015/10/5/your-load-generator-is-probably-lying-to-you-take-the-red-pi.html).
 
 You can choose to get a human-friendly report or a CSV report using the `--output` option.
@@ -90,7 +88,7 @@ Exit code is 1 for failure during run.
 
 The language is based on the language used by [pgbench](https://www.postgresql.org/docs/10/pgbench.html).
 
-A script defines a database transaction to be executed.
+A script file defines a database transaction.
 It contains one or more cypher queries, and can optionally contain "meta-commands".
 Meta-commands start with a colon and end at the newline.
 Cypher statements can span multiple lines, and end with a semi-colon.
