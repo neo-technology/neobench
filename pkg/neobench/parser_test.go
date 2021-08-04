@@ -289,7 +289,7 @@ RETURN $serverSide + {serverSide} + $$clientSide, $$clientSideList`, 1)
 	assert.NoError(t, err)
 	assert.Equal(t, []Statement{
 		{
-			Query:  "RETURN {serverSide} + 7331, [\"hello1\", \"hello2\"]",
+			Query:  "RETURN $serverSide + {serverSide} + 7331, [\"hello1\", \"hello2\"]",
 			Params: map[string]interface{}{"serverSide": int64(1337)},
 		},
 	}, uow.Statements)
