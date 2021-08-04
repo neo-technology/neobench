@@ -89,6 +89,16 @@ ORDER BY weight DESC;
 
 const ldbcStartYear = 2002
 
+const ldbcNumContinents = int64(6)
+const ldbcNumCountries = int64(111)
+const ldbcNumCities = int64(1343)
+
+const ldbcNumUniversities = int64(6380)
+const ldbcNumCompanies = int64(1575)
+
+const ldbcNumTags = int64(16080)
+const ldbcNumTagClasses = int64(71)
+
 // This populates a dataset that follows the LDBC SNB schema and attempts to achieve superficially similar
 // distributions. It is *not* LDBC, but it is intended as a proxy for it. Ideally, if you have a setup that
 // works well with this benchmark, it'd also do well in the real LDBC benchmark.
@@ -100,18 +110,6 @@ const ldbcStartYear = 2002
 // ten years worth of activity in the social network, with users joining over time, creating new forums,
 // forming new friendships and so on.
 func InitLDBCLike(scale, seed int64, dbName string, driver neo4j.Driver, out neobench.Output) error {
-	random := rand.New(rand.NewSource(seed))
-
-	numContinents := int64(6)
-	numCountries := int64(111)
-	numCities := int64(1343)
-
-	numUniversities := int64(6380)
-	numCompanies := int64(1575)
-
-	numTags := int64(16080)
-	numTagClasses := int64(71)
-
 	numPeople := 9892 * scale
 
 	now := time.Date(ldbcStartYear, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -124,116 +122,47 @@ func InitLDBCLike(scale, seed int64, dbName string, driver neo4j.Driver, out neo
 	defer session.Close()
 
 	// Make sure we're working against a db with no ldbc data in it; we are not (yet!) reentrant
-	result, err := session.Run("MATCH (p:Person) RETURN COUNT(p) AS numPeople", nil)
+	result, err := session.Run("MATCH (meta:__NEOBENCH_META__) RETURN meta.completed as completed, meta.lastAction as lastAction, meta.seed as seed, meta.scale as scale", nil)
 	if err != nil {
 		return err
 	}
-	result.Next()
-	preExistingPeople := int(result.Record().GetByIndex(0).(int64))
-	if preExistingPeople > 0 {
-		return fmt.Errorf("there appears to be data in the target database already; please note that the ldbc dataset generator is not yet re-entrant, it only works against empty graphs")
+	preExistingActions := 0
+	if result.Next() == true {
+		existingCompleted := result.Record().Values[0].(bool)
+		preExistingActions = int(result.Record().Values[1].(int64))
+		existingSeed := result.Record().Values[2].(int64)
+		existingScale := result.Record().Values[3].(int64)
+
+		if existingScale == scale && existingCompleted {
+			out.ReportProgress(neobench.ProgressReport{
+				Section:      "init",
+				Step:         "dataset already populated",
+				Completeness: 1,
+			})
+			return nil
+		}
+
+		// The target database already has a partially populated dataset; if scale is the same, we can pick up where
+		// the prior job stopped
+		if existingScale != scale {
+			return fmt.Errorf("target database contains a partially populated dataset with --scale %d. Please either clear the database or re-run with --scale set to %d to resume population", existingScale, existingScale)
+		}
+
+		seed = existingSeed
 	}
 
-	// Schema
-	err = ensureSchema(session, []schemaEntry{
-		{Label: "Continent", Property: "name", Unique: true},
-		{Label: "City", Property: "name", Unique: true},
-		{Label: "Country", Property: "name", Unique: true},
-		{Label: "Country", Property: "id", Unique: true},
-
-		{Label: "Person", Property: "id", Unique: true},
-		{Label: "TagClass", Property: "name", Unique: true},
-		{Label: "Tag", Property: "id", Unique: true},
-		{Label: "Tag", Property: "name", Unique: true},
-		{Label: "Forum", Property: "id", Unique: true},
-		{Label: "Message", Property: "id", Unique: true},
-
-		{Label: "Person", Property: "birthday_day", Unique: false},
-		{Label: "Person", Property: "birthday_month", Unique: false},
-		{Label: "Person", Property: "firstName", Unique: false},
-		{Label: "Person", Property: "lastName", Unique: false},
-		{Label: "Message", Property: "creationDate", Unique: false},
-	})
-	if err != nil {
-		return errors.Wrapf(err, "failed to do schema setup")
+	if preExistingActions == 0 {
+		initRandom := rand.New(rand.NewSource(seed + 1337))
+		if err := ldbcInitStaticData(initRandom, session, out); err != nil {
+			return err
+		}
 	}
 
-	out.ReportProgress(neobench.ProgressReport{
-		Section:      "init",
-		Step:         "create static graph portion",
-		Completeness: 0,
-	})
-
-	// Places
-	err = runQ(session, `UNWIND $places AS place
-WITH place[0] as continentName, place[1] as countryName, place[2] as cityName
-MERGE (continent:Continent {name: continentName, uri: "https://continents.com/" + continentName})
-MERGE (country:Country {name: countryName, uri: "https://countries.com/" + countryName})
-MERGE (country)-[:IS_PART_OF]-(continent)
-MERGE (city:City {name: cityName, uri: "https://cities.com/" + cityName})
-MERGE (city)-[:IS_PART_OF]->(country)
-`, map[string]interface{}{
-		"places": generateLDBCPlaces(random, numContinents, numCountries, numCities),
-	})
-	if err != nil {
-		return err
-	}
-
-	// Organizations
-	err = runQ(session, `UNWIND $universities AS row
-WITH row[0] as cityName, row[1] as uniName
-MATCH (city:City {name: cityName})
-MERGE (uni:University {name: uniName, url: "https://university.edu/" + uniName})
-MERGE (uni)-[:IS_LOCATED_IN]->(city)
-`, map[string]interface{}{
-		"universities": generateLDBCUniversities(random, numCities, numUniversities),
-	})
-	if err != nil {
-		return err
-	}
-
-	err = runQ(session, `UNWIND $companies AS row
-WITH row[0] as countryName, row[1] as corpName
-MATCH (country:Country {name: countryName})
-MERGE (corp:Country {name: corpName, url: "https://corp.com/" + corpName})
-MERGE (corp)-[:IS_LOCATED_IN]->(country)
-`, map[string]interface{}{
-		"companies": generateLDBCCompanies(random, numCities, numCompanies),
-	})
-	if err != nil {
-		return err
-	}
-
-	// TagClasses
-	err = runQ(session, `MERGE (root:TagClass {name: "TagClass-0"}) ON CREATE SET root.url = "https://tagclass.com/tagclass-0"
-WITH root
-UNWIND $classes as row
-WITH row[0] as className, row[1] as parentName
-MERGE (c:TagClass {name: className, url: "https://tagclass.com/" + className})
-WITH c, parentName
-MATCH (p:TagClass {name: parentName})
-MERGE (c)-[:IS_SUBCLASS_OF]->(p)
-`, map[string]interface{}{
-		"classes": generateLDBCTagClasses(random, numTagClasses),
-	})
-	if err != nil {
-		return err
-	}
-
-	// Tags
-	err = runQ(session, `
-UNWIND $tags as row
-WITH row[0] as tagName, row[1] as className
-MERGE (c:Tag {name: tagName, url: "https://tag.com/" + tagName})
-WITH c, className
-MATCH (p:TagClass {name: className})
-MERGE (c)-[:HAS_TYPE]->(p)
-`, map[string]interface{}{
-		"tags": generateLDBCTags(random, numTags, numTagClasses),
-	})
-	if err != nil {
-		return err
-	}
+	// Create a new clean random from seed here, because otherwise we're not
+	// deterministic, because the initial population draws a bunch of values for
+	// setting up the static dataset portion; this is about resuming population
+	// if it stops midway through
+	random := rand.New(rand.NewSource(seed))
 
 	// Dynamic graph portion
 
@@ -284,50 +213,31 @@ MERGE (c)-[:HAS_TYPE]->(p)
 		return msgId
 	}
 
-	actionCreatePost := func(actor int, now time.Time) statement {
+	actionCreatePost := func(actor int, now time.Time) map[string]interface{} {
 		forumId := memberships.pickExponential(actor)
 		messageId := newMessageId(forumId)
 		content := randLDBCMessageContent(random)
-		return statement{
-			query: `MATCH (p:Person {id: $personId}), (f:Forum {id: $forumId})
-CREATE (m:Message:Post {
-  id: $messageId,
-  creationDate: $now,
-  browserUsed: $browserUsed,
-  locationIP: $locationIP,
-  content: $content,
-  length: $length,
-  language: $language,
-  imageFile: $imageFile
-})
-CREATE (f)-[:CONTAINER_OF]->(m)
-CREATE (m)-[:HAS_CREATOR]->(p)
-WITH m
-UNWIND $tags as tag 
-MATCH (t:Tag {name:tag})
-CREATE (m)-[:HAS_TAG]->(t)
-`,
-			params: map[string]interface{}{
-				"personId":    actor,
-				"forumId":     forumId,
-				"messageId":   messageId,
-				"now":         now,
-				"browserUsed": randBrowser(random),
-				"locationIP":  "127.0.0.1",
-				"content":     content,
-				"length":      len(content),
-				"language":    "uz",
-				"imageFile":   "photo1374389534791.jpg",
-				"tags":        randLDBCTags(random, numTags),
-			},
+		return map[string]interface{}{
+			"type":        "p",
+			"personId":    actor,
+			"forumId":     forumId,
+			"messageId":   messageId,
+			"now":         now,
+			"browserUsed": randBrowser(random),
+			"locationIP":  "127.0.0.1",
+			"content":     content,
+			"length":      len(content),
+			"language":    "uz",
+			"imageFile":   "photo1374389534791.jpg",
+			"tags":        randLDBCTags(random, ldbcNumTags),
 		}
 	}
 
-	actionComment := func(actor int, now time.Time) statement {
+	actionComment := func(actor int, now time.Time) map[string]interface{} {
 		forumId := memberships.pickExponential(actor)
 		lastMessage := messageCountsPerForum[forumId]
 		if lastMessage < 1 {
-			return ldbcNoop
+			return nil
 		}
 		parentIndex, _ := neobench.ExponentialRand(random, 1, int64(lastMessage), 10.0)
 		parentId := ldbcMessageId{
@@ -337,42 +247,25 @@ CREATE (m)-[:HAS_TAG]->(t)
 		messageId := newMessageId(forumId)
 
 		content := randLDBCMessageContent(random)
-		return statement{
-			query: `MATCH (p:Person {id: $personId}), (parent:Message {id: $parentId})
-CREATE (c:Message:Comment {
-  id: $messageId,
-  creationDate: $now,
-  browserUsed: $browserUsed,
-  locationIP: $locationIP,
-  content: $content,
-  length: $length
-})
-CREATE (c)-[:REPLY_OF]->(parent)
-CREATE (c)-[:HAS_CREATOR]->(p)
-WITH c
-UNWIND $tags as tag 
-MATCH (t:Tag {name:tag})
-CREATE (c)-[:HAS_TAG]->(t)
-`,
-			params: map[string]interface{}{
-				"personId":    actor,
-				"parentId":    parentId,
-				"messageId":   messageId,
-				"now":         now,
-				"browserUsed": randBrowser(random),
-				"locationIP":  "127.0.0.1",
-				"content":     content,
-				"length":      len(content),
-				"tags":        randLDBCTags(random, numTags),
-			},
+		return map[string]interface{}{
+			"type":        "c",
+			"personId":    actor,
+			"parentId":    parentId,
+			"messageId":   messageId,
+			"now":         now,
+			"browserUsed": randBrowser(random),
+			"locationIP":  "127.0.0.1",
+			"content":     content,
+			"length":      len(content),
+			"tags":        randLDBCTags(random, ldbcNumTags),
 		}
 	}
 
-	actionLike := func(actor int, now time.Time) statement {
+	actionLike := func(actor int, now time.Time) map[string]interface{} {
 		forumId := memberships.pickExponential(actor)
 		lastMessage := messageCountsPerForum[forumId]
 		if lastMessage < 1 {
-			return ldbcNoop
+			return nil
 		}
 		messageIndex, _ := neobench.ExponentialRand(random, 1, int64(lastMessage), 10.0)
 		messageId := ldbcMessageId{
@@ -380,19 +273,15 @@ CREATE (c)-[:HAS_TAG]->(t)
 			messageIndex: int(messageIndex),
 		}.serialize()
 
-		return statement{
-			query: `MATCH (p:Person {id: $personId}), (msg:Message {id: $messageId})
-CREATE (p)-[:LIKES {creationDate: $now}]->(msg)
-`,
-			params: map[string]interface{}{
-				"personId":  actor,
-				"messageId": messageId,
-				"now":       now,
-			},
+		return map[string]interface{}{
+			"type":      "l",
+			"personId":  actor,
+			"messageId": messageId,
+			"now":       now,
 		}
 	}
 
-	actionAddFriend := func(actor int, now time.Time) statement {
+	actionAddFriend := func(actor int, now time.Time) map[string]interface{} {
 		friendId := 0
 		// TODO: Weight this to favor friend-of-friends
 		tries := 0
@@ -404,26 +293,22 @@ CREATE (p)-[:LIKES {creationDate: $now}]->(msg)
 			tries += 1
 			if tries > 10 {
 				// In small graphs, we sometimes can't find any new friendships to add, make these no-ops
-				return ldbcNoop
+				return nil
 			}
 		}
 		friends.insert(actor, friendId)
 		friends.insert(friendId, actor)
-		return statement{
-			query: `MATCH (p:Person {id: $personId}), (f:Person {id: $friendId})
-MERGE (m)<-[:KNOWS {creationDate: $now}]-(f)
-`,
-			params: map[string]interface{}{
-				"personId": actor,
-				"friendId": friendId,
-				"now":      now,
-			},
+		return map[string]interface{}{
+			"type":     "af",
+			"personId": actor,
+			"friendId": friendId,
+			"now":      now,
 		}
 	}
 
-	actionJoinForum := func(actor int, now time.Time) statement {
+	actionJoinForum := func(actor int, now time.Time) map[string]interface{} {
 		if forumsCreated < 1 {
-			return ldbcNoop
+			return nil
 		}
 		forumId := 0
 		// TODO: Weight this to favor friends' forums
@@ -436,23 +321,19 @@ MERGE (m)<-[:KNOWS {creationDate: $now}]-(f)
 			tries += 1
 			if tries > 10 {
 				// In small graphs, we sometimes can't find any new friendships to add, make these no-ops
-				return ldbcNoop
+				return nil
 			}
 		}
 		memberships.insert(actor, forumId)
-		return statement{
-			query: `MATCH (p:Person {id: $personId}), (f:Forum {id: $forumId})
-MERGE (p)<-[:HAS_MEMBER {joinDate: $now}]-(f)
-`,
-			params: map[string]interface{}{
-				"personId": actor,
-				"forumId":  forumId,
-				"now":      now,
-			},
+		return map[string]interface{}{
+			"type":     "jf",
+			"personId": actor,
+			"forumId":  forumId,
+			"now":      now,
 		}
 	}
 
-	actionCreateForum := func(actor int, now time.Time) statement {
+	actionCreateForum := func(actor int, now time.Time) map[string]interface{} {
 		forumId := forumsCreated + 1
 		forumsCreated += 1
 
@@ -460,24 +341,13 @@ MERGE (p)<-[:HAS_MEMBER {joinDate: $now}]-(f)
 
 		memberships.insert(actor, forumId)
 		memberships.insert(actor, forumId)
-		return statement{
-			query: `MATCH (p:Person {id: $personId})
-MERGE (f:Forum {id: $forumId})
-ON CREATE SET f.title = $title, f.creationDate = $now
-MERGE (f)-[:HAS_MODERATOR]->(p)
-MERGE (f)-[:HAS_MEMBER {joinDate: $now}]->(p)
-WITH f
-UNWIND $tags as tag 
-MATCH (t:Tag {name:tag})
-MERGE (f)-[:HAS_TAG]->(t)
-`,
-			params: map[string]interface{}{
-				"personId": actor,
-				"forumId":  forumId,
-				"now":      now,
-				"title":    fmt.Sprintf("Forum %d created by Person-%d", forumId, actor),
-				"tags":     randLDBCTags(random, numTags),
-			},
+		return map[string]interface{}{
+			"type":     "cf",
+			"personId": actor,
+			"forumId":  forumId,
+			"now":      now,
+			"title":    fmt.Sprintf("Forum %d created by Person-%d", forumId, actor),
+			"tags":     randLDBCTags(random, ldbcNumTags),
 		}
 	}
 
@@ -504,19 +374,173 @@ MERGE (f)-[:HAS_TAG]->(t)
 	// and to try to excercise similar choke points.
 	actionsPerDayPerPerson := 0.4
 	estTotalActions := int64(daysOfActivity)*int64(float64(numPeople)*actionsPerDayPerPerson/2) + numPeople
-	actions := make([]statement, 0, 1024)
+	actions := make([]map[string]interface{}, 0, 1024)
 
+	performedActions := 0
 	performActions := func() error {
+		// All this stuff about performedActions and preExistingActions is about resumability; being able to start
+		// populating again after population fails for some reason; we store in the db what the last action inserted
+		// was, and fast-forward through stuff here if need be
+		performedActions += len(actions)
+
+		if preExistingActions >= performedActions {
+			return nil
+		}
+
 		_, err := session.WriteTransaction(func(tx neo4j.Transaction) (interface{}, error) {
-			for _, action := range actions {
-				res, err := tx.Run(action.query, action.params)
-				if err != nil {
-					return nil, errors.Wrapf(err, "for action: %s, params=%v", action.query, action.params)
-				}
-				_, err = res.Consume() // Need to call this to avoid bug in driver
-				if err != nil {
-					return nil, errors.Wrapf(err, "for action: %s, params=%v", action.query, action.params)
-				}
+			q := `
+MERGE (meta:__NEOBENCH_META__)
+SET meta = {completed: false, lastAction: $lastAction, seed: $seed, scale: $scale }
+WITH 1 AS row LIMIT 1
+
+UNWIND $actions as action
+
+CALL {
+  WITH action
+  UNWIND CASE action.type WHEN 'cf' THEN [1] ELSE [] END AS i
+
+  MATCH (p:Person {id: action.personId})
+  MERGE (f:Forum {id: action.forumId})
+  ON CREATE SET f.title = action.title, f.creationDate = action.now
+  MERGE (f)-[:HAS_MODERATOR]->(p)
+  MERGE (f)-[:HAS_MEMBER {joinDate: action.now}]->(p)
+  WITH action, f
+  UNWIND action.tags as tag 
+  MATCH (t:Tag {name:tag})
+  MERGE (f)-[:HAS_TAG]->(t)
+  RETURN COUNT(*) AS createForumCount
+}
+
+CALL {
+  WITH action
+  UNWIND CASE action.type WHEN 'af' THEN [1] ELSE [] END AS i
+
+  MATCH (p:Person {id: action.personId}), (f:Person {id: action.friendId})
+  MERGE (m)<-[:KNOWS {creationDate: action.now}]-(f)
+  RETURN COUNT(*) AS addFriendCount
+}
+
+CALL {
+  WITH action
+  UNWIND CASE action.type WHEN 'p' THEN [1] ELSE [] END AS i
+
+  MATCH (p:Person {id: action.personId}), (f:Forum {id: action.forumId})
+  CREATE (m:Message:Post {
+    id: action.messageId,
+    creationDate: action.now,
+    browserUsed: action.browserUsed,
+    locationIP: action.locationIP,
+    content: action.content,
+    length: action.length,
+    language: action.language,
+    imageFile: action.imageFile
+  })
+  CREATE (f)-[:CONTAINER_OF]->(m)
+  CREATE (m)-[:HAS_CREATOR]->(p)
+  WITH action, m
+  UNWIND action.tags as tag 
+  MATCH (t:Tag {name:tag})
+  CREATE (m)-[:HAS_TAG]->(t)
+
+  RETURN COUNT(*) AS createPostCount
+}
+
+CALL {
+  WITH action
+  UNWIND CASE action.type WHEN 'jf' THEN [1] ELSE [] END AS i
+
+  MATCH (p:Person {id: action.personId}), (f:Forum {id: action.forumId})
+  MERGE (p)<-[:HAS_MEMBER {joinDate: action.now}]-(f)
+
+  RETURN COUNT(*) AS joinForumCount
+}
+
+CALL {
+  WITH action
+  UNWIND CASE action.type WHEN 'c' THEN [1] ELSE [] END AS i
+
+  MATCH (p:Person {id: action.personId}), (parent:Message {id: action.parentId})
+  CREATE (c:Message:Comment {
+    id: action.messageId,
+    creationDate: action.now,
+    browserUsed: action.browserUsed,
+    locationIP: action.locationIP,
+    content: action.content,
+    length: action.length
+  })
+  CREATE (c)-[:REPLY_OF]->(parent)
+  CREATE (c)-[:HAS_CREATOR]->(p)
+  WITH action, c
+  UNWIND action.tags as tag 
+  MATCH (t:Tag {name:tag})
+  CREATE (c)-[:HAS_TAG]->(t)
+
+  RETURN COUNT(*) AS commentCount
+}
+
+CALL {
+  WITH action
+  UNWIND CASE action.type WHEN 'l' THEN [1] ELSE [] END AS i
+
+  MATCH (p:Person {id: action.personId}), (msg:Message {id: action.messageId})
+  CREATE (p)-[:LIKES {creationDate: action.now}]->(msg)
+
+  RETURN COUNT(*) AS likeCount
+}
+
+CALL {
+  WITH action
+  UNWIND CASE action.type WHEN 'cp' THEN [1] ELSE [] END AS i
+
+  CREATE (p:Person {
+    id: action.personNo,
+    creationDate: action.creationDate,
+    firstName: action.firstName,
+    lastName: action.lastName,
+    gender: action.gender,
+    birthday: action.birthday,
+    email: action.personNo + "@persons.com",
+    speaks: action.speaks,
+    browserUsed: action.browserUsed,
+    locationIP: action.locationIP
+  })
+  WITH action, p 
+  MATCH (city:City {name: action.city})
+  CREATE (p)-[:IS_LOCATED_IN]->(city)
+  
+  WITH action, p LIMIT 1
+  UNWIND action.interests as interest 
+  MATCH (t:Tag {name: interest})
+  CREATE (p)-[:HAS_INTEREST]->(t)
+  
+  WITH action, p LIMIT 1
+  UNWIND action.companies as company
+  MATCH (c:Company {name: company.name})
+  CREATE (p)-[:WORK_AT {workFrom: company.workFrom}]->(c)
+  
+  WITH action, p LIMIT 1
+  UNWIND action.universities as university
+  MATCH (u:University {name: university.name})
+  CREATE (p)-[:STUDY_AT {classYear: university.classYear}]->(u)
+
+  RETURN COUNT(*) AS createPersonCount
+}
+
+RETURN COUNT(*) AS i
+`
+
+			res, err := tx.Run(q, map[string]interface{}{
+				"actions":    actions,
+				"lastAction": performedActions,
+				"seed":       seed,
+				"scale":      scale,
+			})
+			if err != nil {
+				return nil, errors.Wrap(err, "..")
+			}
+			_, err = res.Consume() // Need to call this to avoid bug in driver
+			if err != nil {
+				return nil, errors.Wrap(err, "..")
 			}
 			return nil, nil
 		})
@@ -526,13 +550,16 @@ MERGE (f)-[:HAS_TAG]->(t)
 		return nil
 	}
 
+	startTime := time.Now()
+
 	for dayNo := 0; dayNo < daysOfActivity; dayNo++ {
 		now = now.AddDate(0, 0, 1)
-		fmt.Printf("%s (day %d, %d people, %d actions taken)\n", now, dayNo, peopleCreated, actionsTaken)
+		realDelta := int(time.Now().Sub(startTime).Seconds())
+		fmt.Printf("%s (day %d, %d people, %d actions taken in %d seconds)\n", now, dayNo, peopleCreated, actionsTaken, realDelta)
 		signupCumulator += signupsPerDay
 		for signupCumulator > 1 {
 			signupCumulator -= 1
-			actions = append(actions, createLDBCPerson(random, session, peopleCreated+1, now, numCities, numUniversities, numCompanies, numTags))
+			actions = append(actions, createLDBCPerson(random, peopleCreated+1, now, ldbcNumCities, ldbcNumUniversities, ldbcNumCompanies, ldbcNumTags))
 			peopleCreated += 1
 		}
 
@@ -553,8 +580,8 @@ MERGE (f)-[:HAS_TAG]->(t)
 			} else if memberships.count(actor) == 0 {
 				actionSet = actionSetWhenNoMembership
 			}
-			action := actionSet.Draw(random).(func(int, time.Time) statement)(actor, now)
-			if action.query == ldbcNoop.query {
+			action := actionSet.Draw(random).(func(int, time.Time) map[string]interface{})(actor, now)
+			if action == nil {
 				continue
 			}
 			actions = append(actions, action)
@@ -586,12 +613,8 @@ MERGE (f)-[:HAS_TAG]->(t)
 		}
 	}
 
-	return nil
-}
-
-var ldbcNoop = statement{
-	query:  "RETURN 'noop'",
-	params: nil,
+	return runQ(session, `MERGE (meta:__NEOBENCH_META__)
+SET meta.completed = true`, nil)
 }
 
 type choiceMatrix32 struct {
@@ -626,11 +649,6 @@ func (c *choiceMatrix32) count(key int) int {
 	return len(c.entries[key])
 }
 
-type statement struct {
-	query  string
-	params map[string]interface{}
-}
-
 // session.Run() does not surface errors, so emulate it
 func runQ(session neo4j.Session, query string, params map[string]interface{}) error {
 	_, err := session.WriteTransaction(func(tx neo4j.Transaction) (interface{}, error) {
@@ -651,15 +669,6 @@ type ldbcMessageId struct {
 
 func (m ldbcMessageId) serialize() int64 {
 	return int64(m.forumId)<<(8*4) | int64(m.messageIndex)
-}
-
-func deserializeMessageId(raw int64) ldbcMessageId {
-	forumId := raw >> (8 * 4)
-	messageIndex := raw & 0xffffffff
-	return ldbcMessageId{
-		forumId:      int(forumId),
-		messageIndex: int(messageIndex),
-	}
 }
 
 // List of 3-tuples; each tuple is (continent, country, city); countries are distributed exponentially
@@ -727,66 +736,156 @@ func generateLDBCTagClasses(random *rand.Rand, numTagClasses int64) (out [][]str
 	return
 }
 
-func createLDBCPerson(random *rand.Rand, session neo4j.Session, personNo int, creationDate time.Time, numCities, numUniversities, numCompanies, numTags int64) statement {
+func createLDBCPerson(random *rand.Rand, personNo int, creationDate time.Time, numCities, numUniversities, numCompanies, numTags int64) map[string]interface{} {
 	birthDayOfYear, _ := neobench.ExponentialRand(random, 0, 364, 5.0)
 	birthYear := ldbcStartYear - 80 + random.Intn(70)
 	birthDay := time.Date(birthYear, 0, 0, 0, 0, 0, 0, time.UTC).AddDate(0, 0, int(birthDayOfYear))
 
-	unisStudiedAt := ""
+	var universities []map[string]interface{}
 	for i := 0; i < random.Intn(4); i++ {
 		uniName := randLDBCUniversity(random, numUniversities)
 		classYear := birthYear + 19 + 4*i
-		unisStudiedAt += fmt.Sprintf(`WITH p MATCH (uni%d:University {name: '%s'})
-CREATE (p)-[:STUDY_AT {classYear: %d}]->(uni%d)
-`, i, uniName, classYear, i)
+		universities = append(universities, map[string]interface{}{
+			"name":      uniName,
+			"classYear": classYear,
+		})
 	}
 
-	companiesWorkedAt := ""
+	var companies []map[string]interface{}
 	for i := 0; i < random.Intn(8); i++ {
 		compName := randLDBCCompany(random, numCompanies)
 		workFrom := birthYear + 18 + i*2
-		companiesWorkedAt += fmt.Sprintf(`WITH p MATCH (comp%d:Company {name: '%s'})
-CREATE (p)-[:WORK_AT {workFrom: %d}]->(comp%d)
-`, i, compName, workFrom, i)
+		companies = append(companies, map[string]interface{}{
+			"name":     compName,
+			"workFrom": workFrom,
+		})
 	}
 
-	interests := ""
+	var interests []string
 	for i := 2; i < random.Intn(16); i++ {
-		interests += fmt.Sprintf(`WITH p MATCH (tag%d:Tag {name: '%s'})
-CREATE (p)-[:HAS_INTEREST]->(tag%d)
-`, i, randLDBCTag(random, numTags), i)
+		interests = append(interests, randLDBCTag(random, numTags))
 	}
 
-	return statement{
-		query: `CREATE (p:Person {
-  id: $personNo,
-  creationDate: $creationDate,
-  firstName: $firstName,
-  lastName: $lastName,
-  gender: $gender,
-  birthday: $birthday,
-  email: $personNo + "@persons.com",
-  speaks: $speaks,
-  browserUsed: $browserUsed,
-  locationIP: $locationIP
-})
-WITH p MATCH (city:City {name: $city})
-CREATE (p)-[:IS_LOCATED_IN]->(city)
-` + unisStudiedAt + companiesWorkedAt + interests,
-		params: map[string]interface{}{
-			"personNo":     personNo,
-			"creationDate": creationDate,
-			"firstName":    randFirstName(random),
-			"lastName":     randLastName(random),
-			"gender":       randGender(random),
-			"birthday":     birthDay,
-			"birthyear":    birthYear,
-			"speaks":       []string{"mandarin", "dutch"},
-			"browserUsed":  "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.88 Safari/537.36",
-			"locationIP":   "127.0.0.1",
-			"city":         randLDBCCity(random, numCities),
-		},
+	return map[string]interface{}{
+		"type":         "cp",
+		"personNo":     personNo,
+		"creationDate": creationDate,
+		"firstName":    randFirstName(random),
+		"lastName":     randLastName(random),
+		"gender":       randGender(random),
+		"birthday":     birthDay,
+		"birthyear":    birthYear,
+		"speaks":       []string{"mandarin", "dutch"},
+		"browserUsed":  "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.88 Safari/537.36",
+		"locationIP":   "127.0.0.1",
+		"city":         randLDBCCity(random, numCities),
+		"interests":    interests,
+		"universities": universities,
+		"companies":    companies,
 	}
+}
+
+func ldbcInitStaticData(random *rand.Rand, session neo4j.Session, out neobench.Output) error {
+	// Schema
+	out.ReportProgress(neobench.ProgressReport{
+		Section:      "init",
+		Step:         "create static graph portion",
+		Completeness: 0,
+	})
+	err := ensureSchema(session, []schemaEntry{
+		{Label: "Continent", Property: "name", Unique: true},
+		{Label: "City", Property: "name", Unique: true},
+		{Label: "Country", Property: "name", Unique: true},
+		{Label: "Country", Property: "id", Unique: true},
+
+		{Label: "Person", Property: "id", Unique: true},
+		{Label: "TagClass", Property: "name", Unique: true},
+		{Label: "Tag", Property: "id", Unique: true},
+		{Label: "Tag", Property: "name", Unique: true},
+		{Label: "Forum", Property: "id", Unique: true},
+		{Label: "Message", Property: "id", Unique: true},
+
+		{Label: "Person", Property: "birthday_day", Unique: false},
+		{Label: "Person", Property: "birthday_month", Unique: false},
+		{Label: "Person", Property: "firstName", Unique: false},
+		{Label: "Person", Property: "lastName", Unique: false},
+		{Label: "Message", Property: "creationDate", Unique: false},
+	})
+	if err != nil {
+		return errors.Wrapf(err, "failed to do schema setup")
+	}
+
+	// Places
+	err = runQ(session, `UNWIND $places AS place
+WITH place[0] as continentName, place[1] as countryName, place[2] as cityName
+MERGE (continent:Continent {name: continentName, uri: "https://continents.com/" + continentName})
+MERGE (country:Country {name: countryName, uri: "https://countries.com/" + countryName})
+MERGE (country)-[:IS_PART_OF]-(continent)
+MERGE (city:City {name: cityName, uri: "https://cities.com/" + cityName})
+MERGE (city)-[:IS_PART_OF]->(country)
+`, map[string]interface{}{
+		"places": generateLDBCPlaces(random, ldbcNumContinents, ldbcNumCountries, ldbcNumCities),
+	})
+	if err != nil {
+		return err
+	}
+
+	// Organizations
+	err = runQ(session, `UNWIND $universities AS row
+WITH row[0] as cityName, row[1] as uniName
+MATCH (city:City {name: cityName})
+MERGE (uni:University {name: uniName, url: "https://university.edu/" + uniName})
+MERGE (uni)-[:IS_LOCATED_IN]->(city)
+`, map[string]interface{}{
+		"universities": generateLDBCUniversities(random, ldbcNumCities, ldbcNumUniversities),
+	})
+	if err != nil {
+		return err
+	}
+
+	err = runQ(session, `UNWIND $companies AS row
+WITH row[0] as countryName, row[1] as corpName
+MATCH (country:Country {name: countryName})
+MERGE (corp:Country {name: corpName, url: "https://corp.com/" + corpName})
+MERGE (corp)-[:IS_LOCATED_IN]->(country)
+`, map[string]interface{}{
+		"companies": generateLDBCCompanies(random, ldbcNumCities, ldbcNumCompanies),
+	})
+	if err != nil {
+		return err
+	}
+
+	// TagClasses
+	err = runQ(session, `MERGE (root:TagClass {name: "TagClass-0"}) ON CREATE SET root.url = "https://tagclass.com/tagclass-0"
+WITH root
+UNWIND $classes as row
+WITH row[0] as className, row[1] as parentName
+MERGE (c:TagClass {name: className, url: "https://tagclass.com/" + className})
+WITH c, parentName
+MATCH (p:TagClass {name: parentName})
+MERGE (c)-[:IS_SUBCLASS_OF]->(p)
+`, map[string]interface{}{
+		"classes": generateLDBCTagClasses(random, ldbcNumTagClasses),
+	})
+	if err != nil {
+		return err
+	}
+
+	// Tags
+	err = runQ(session, `
+UNWIND $tags as row
+WITH row[0] as tagName, row[1] as className
+MERGE (c:Tag {name: tagName, url: "https://tag.com/" + tagName})
+WITH c, className
+MATCH (p:TagClass {name: className})
+MERGE (c)-[:HAS_TYPE]->(p)
+`, map[string]interface{}{
+		"tags": generateLDBCTags(random, ldbcNumTags, ldbcNumTagClasses),
+	})
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // Return 2-tuples of (tagname, tagclass)
