@@ -29,6 +29,8 @@ You can download download binaries the "assets" section in the latest release [h
 
 ### Option 2: Run via docker
 
+Easier to use, but note that running against localhost won't work (easily).
+
     docker run jjdh/neobench -h
 
 ## Usage
