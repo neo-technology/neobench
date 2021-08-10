@@ -88,7 +88,7 @@ MERGE (t:Teller {tid: tellerId}) SET t.balance = 0
 	batchSize := int64(5000)
 	numBatches := numAccounts / batchSize
 	for batchNo := int64(0); batchNo <= numBatches; batchNo++ {
-		startAccount := max(existingAccountNum, batchSize*batchNo+1)
+		startAccount := max(existingAccountNum, batchSize*batchNo) + 1
 		endAccount := min(numAccounts, startAccount+batchSize) - 1
 		if endAccount <= startAccount {
 			continue
