@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
+	"math"
 	"neobench/pkg/neobench"
 )
 
@@ -86,8 +87,9 @@ MERGE (t:Teller {tid: tellerId}) SET t.balance = 0
 	existingAccountNum := result.Record().GetByIndex(0).(int64)
 
 	batchSize := int64(5000)
+	startAtBatch := int64(math.Floor(float64(existingAccountNum) / float64(batchSize)))
 	numBatches := numAccounts / batchSize
-	for batchNo := int64(0); batchNo <= numBatches; batchNo++ {
+	for batchNo := int64(startAtBatch); batchNo <= numBatches; batchNo++ {
 		startAccount := max(existingAccountNum, batchSize*batchNo) + 1
 		endAccount := min(numAccounts, startAccount+batchSize) - 1
 		if endAccount <= startAccount {
