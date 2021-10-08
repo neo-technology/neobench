@@ -185,10 +185,10 @@ func (o *InteractiveOutput) ReportThroughput(result Result) {
 
 	s.WriteString("== Results ==\n")
 	s.WriteString(fmt.Sprintf("Scenario: %s\n", result.Scenario))
-	s.WriteString(fmt.Sprintf("Successful Transactions: %d (%.3f per second)\n", result.TotalSucceeded(), result.TotalRate()))
+	s.WriteString(fmt.Sprintf("%d successful transactions, %d failed. (Total of %.3f per second)\n", result.TotalSucceeded(), result.TotalFailed(), result.TotalRate()))
 	s.WriteString("\n")
 	for _, script := range result.Scripts {
-		s.WriteString(fmt.Sprintf("  [%s]: %.03f successful transactions per second\n", script.ScriptName, script.Rate))
+		s.WriteString(fmt.Sprintf("  [%s]: %.03f total transactions per second\n", script.ScriptName, script.Rate))
 	}
 	s.WriteString("\n")
 	writeErrorReport(result, &s)
@@ -205,7 +205,7 @@ func (o *InteractiveOutput) ReportLatency(result Result) {
 	s.WriteString("== Results ==\n")
 
 	s.WriteString(fmt.Sprintf("Scenario: %s\n", result.Scenario))
-	s.WriteString(fmt.Sprintf("Successful Transactions: %d (%.3f per second)\n", result.TotalSucceeded(), result.TotalRate()))
+	s.WriteString(fmt.Sprintf("%d successful transactions, %d failed. (Total of %.3f per second)\n", result.TotalSucceeded(), result.TotalFailed(), result.TotalRate()))
 
 	if result.TotalSucceeded() > 0 {
 		for _, workload := range result.Scripts {
@@ -226,7 +226,7 @@ func (o *InteractiveOutput) ReportLatency(result Result) {
 func summarizeLatency(script *ScriptResult, s *strings.Builder, indent string) {
 	histo := script.Latencies
 	lines := []string{
-		fmt.Sprintf("Successful Transactions: %d (%.3f per second)\n\n", script.Succeeded, script.Rate),
+		fmt.Sprintf("%d successful transactions, %d failed. (Total of %.3f per second)\n", script.Succeeded, script.Failed, script.Rate),
 		fmt.Sprintf("Max: %.3fms, Min: %.3fms, Mean: %.3fms, Stddev: %.3f\n\n",
 			float64(histo.Max())/1000.0, float64(histo.Min())/1000.0, histo.Mean()/1000.0, histo.StdDev()/1000.0),
 		fmt.Sprintf("Latency distribution:\n"),
