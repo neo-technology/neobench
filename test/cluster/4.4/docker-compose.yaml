@@ -8,18 +8,18 @@ x-core-common-env:
   NEO4J_causal__clustering_minimum__core__cluster__size__at__formation: 3
   NEO4J_causal__clustering_minimum__core__cluster__size__at__runtime: 3
   NEO4J_causal__clustering_initial__discovery__members: c1:5000,c2:5000,c3:5000
-  NEO4J_dbms_memory_pagecache_size: 32m
-  NEO4J_dbms_memory_heap_initial__size: 512m
-  NEO4J_dbms_memory_heap_max__size: 512m
+  NEO4J_dbms_memory_pagecache_size: 512m
+  NEO4J_dbms_memory_heap_initial__size: 1g
+  NEO4J_dbms_memory_heap_max__size: 1g
   NEO4J_metrics_prometheus_enabled: "true"
 
 x-core-common:
   &core-common
-  image: neo4j:4.1.0-enterprise
+  image: neo4j:4.4-enterprise
   cap_add:
     - NET_ADMIN
-  mem_limit: 1G
-  memswap_limit: 1G
+  mem_limit: 2G
+  memswap_limit: 2G
 
 services:
   c1:

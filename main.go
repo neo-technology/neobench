@@ -42,13 +42,13 @@ func init() {
 	pflag.BoolVarP(&fInitMode, "init", "i", false, "when running built-in workloads, run their built-in dataset generator first")
 	pflag.Int64VarP(&fScale, "scale", "s", 1, "sets the `scale` variable, impact depends on workload")
 	pflag.IntVarP(&fClients, "clients", "c", 1, "number of concurrent clients / sessions")
-	pflag.Float64VarP(&fRate, "rate", "r", 1, "in latency mode (see -l) sets total transactions per second")
 	pflag.StringVarP(&fAddress, "address", "a", "neo4j://localhost:7687", "address to connect to")
 	pflag.StringVarP(&fUser, "user", "u", "neo4j", "username")
 	pflag.StringVarP(&fPassword, "password", "p", "neo4j", "password")
 	pflag.StringVarP(&fEncryptionMode, "encryption", "e", "auto", "whether to use encryption, `auto`, `true` or `false`")
 	pflag.DurationVarP(&fDuration, "duration", "d", 60*time.Second, "duration to run, ex: 15s, 1m, 10h")
 	pflag.BoolVarP(&fLatencyMode, "latency", "l", false, "run in latency testing more rather than throughput mode")
+	pflag.Float64VarP(&fRate, "rate", "r", 1, "in latency mode (see -l) sets total transactions per second")
 	pflag.StringVarP(&fOutputFormat, "output", "o", "auto", "output format, `auto`, `interactive` or `csv`")
 
 	// Flags defining the workload to run
