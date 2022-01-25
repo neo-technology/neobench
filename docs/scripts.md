@@ -30,6 +30,42 @@ It consists of two `Commands`.
 First, a `:set` `Meta Command` sets the `personId` parameter to a random value.
 Then a `Query Command` executes a query that uses the generated parameter.
 
+## How to run scripts
+
+You can tell neobench to run scripts either by referencing local file system files (`--file`), or by writing scripts directly on the command line (`--script`).
+You can mix-and match `--script` and `--file`, and specify either as many times as you like, each time defining an additional script.
+You can actually even mix `--script`, `--file` and `--builtin`, adding your own custom scripts as part of the mix a [builtin workload](builtin.md) runs.
+
+### Specify scripts directly on the command line
+
+```
+neobench --script "RETURN 1" --script "RETURN 2"
+```
+
+Will define two scripts that each contain one `Query Command` (ie. the query you see defined there), and execute them with equal distribution.
+
+### Specify scripts from the file system
+
+```
+neobench --file path/to/workload.script
+```
+
+### Specify script weights
+
+When you use the `--file` flag, you can optionally specify a "weight", which is used to determine how often a given script is selected to be ran.
+This lets you compose workloads that, for instance, run 10 read transactions for each write transaction.
+
+It's often useful to set the least-frequent script to have a weight of `1`, and then set the others to be higher weights relative to that.
+Then you can think of it as "for each time this script is run, run this other script N times".
+
+For instance, to run a `read.script` file 5 times for each time neobench runs a `write.script` file:
+
+```
+neobench --file write.script@1 --file read.script@5
+```
+
+If you review the code, you'll find that this weight system is how the built-in ldbc-like workload sets the right distribution of scripts to execute.
+
 ## Commands
 
 When `Neobench` runs a workload, it will start a transaction and then evaluate a `Script` "inside" the transaction.

@@ -4,6 +4,7 @@
 
 Neobench includes two built-in workloads. 
 They are defined by `Scripts` like any other workload, you can see their definitions [here](../pkg/neobench/builtin/ldbc_like.go) and [here](../pkg/neobench/builtin/tpcb_like.go).
+See the [Custom Scripts Documentation](scripts.md) for details on writing your own workload scripts. 
 
 The builtin workloads do have one superpower though: They have dataset population built in.
 
