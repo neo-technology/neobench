@@ -202,11 +202,18 @@ The syntax is the same as cypher list comprehensions.
 # note that the CSV function caches the loaded file, so you can load large files with low performance impact
 :set allNames csv("list-of-names.csv")
 :set names [ i in range(1,10) | $allNames[random(0, len($allNames))] ]
+
+# List comprehensions can be arbitrarily nested
+:set listOfLists [ i in range(1,10) | [ o in range(1,5) | $o ] ]
 ```
 
 ### Functions
 
 Neobench ships with a set of functions you can use in expressions.
+
+There are more functions than these. Initiailly functions were implemented to match those in `pgbench`.
+However, the goal shifted to try to match the functions available in Cypher, to reduce cognitive load.
+Currently that means the functions are an in-between mess that should be cleaned up.
 
 #### Math / number functions
 
@@ -219,7 +226,6 @@ Neobench ships with a set of functions you can use in expressions.
 | sqrt(v)   | Square root of input                  | sqrt(4)   | 2              |
 
 #### List functions
-
 
 | Name        | Description                                              | Example         | Example Output  |
 |-------------|----------------------------------------------------------|-----------------|-----------------|

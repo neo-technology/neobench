@@ -72,11 +72,3 @@ Options:
   -u, --user string                  username (default "neo4j")
 ```
 
-
-
-- Neobench is derived from pgbench
-- Basic example
-- Runs workloads against a specified Neo4j cluster
-- Latency vs throughput benchmarking
-- Builtin workloads
-- Custom workloads

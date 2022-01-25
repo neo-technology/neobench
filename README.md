@@ -45,6 +45,17 @@ Build and run integration tests with `make`
 
 Release with `bin/release`
 
+## Issues prior to 1.0
+
+- Functions should be changed to align with cypher functions as much as possible (eg. `greatest`, `least` etc)
+- Syntax around parameters and when to use `$` and when not to is confusing in list comprehensions,
+  maybe default to never using `$` except in queries? Eg `:set a [ i in range(1,10) | $i ]`; why no $ the first time
+  `i` is used, but then `$` when it's used the second time?
+- Load generation system should probably be modified to have a single goroutine generate load that goes on a queue
+  for workers to execute, rather than each worker generating its own load, because that causes weird blocking issues
+- Support dropping transactions / marking them failed when database can't keep up with a set rate
+- Warn or crash if user specifies `--rate` without also specifying `--latency`
+
 ## Contributions
 
 This project has no current maintainer. 
