@@ -35,6 +35,7 @@ var fWorkloadFiles []string
 var fWorkloadScripts []string
 var fOutputFormat string
 var fNoCheckCertificates bool
+var fDriverDebugLogging bool
 var fMaxConnLifetime time.Duration
 
 func init() {
@@ -47,11 +48,11 @@ func init() {
 	pflag.StringVarP(&fPassword, "password", "p", "neo4j", "password")
 	pflag.StringVarP(&fEncryptionMode, "encryption", "e", "auto", "whether to use encryption, `auto`, `true` or `false`")
 	pflag.DurationVarP(&fDuration, "duration", "d", 60*time.Second, "duration to run, ex: 15s, 1m, 10h")
-	pflag.StringToStringVarP(&fVariables, "define", "D", nil, "defines variables for workload scripts and query parameters")
 	pflag.BoolVarP(&fLatencyMode, "latency", "l", false, "run in latency testing more rather than throughput mode")
 	pflag.StringVarP(&fOutputFormat, "output", "o", "auto", "output format, `auto`, `interactive` or `csv`")
 
 	// Flags defining the workload to run
+	pflag.StringToStringVarP(&fVariables, "define", "D", nil, "defines variables for workload scripts and query parameters")
 	pflag.StringSliceVarP(&fBuiltinWorkloads, "builtin", "b", []string{}, "built-in workload to run 'tpcb-like' or 'ldbc-like', default is tpcb-like")
 	pflag.StringSliceVarP(&fWorkloadFiles, "file", "f", []string{}, "path to workload script file(s)")
 	pflag.StringArrayVarP(&fWorkloadScripts, "script", "S", []string{}, "script(s) to run, directly specified on the command line")
@@ -60,6 +61,7 @@ func init() {
 	pflag.DurationVar(&fProgress, "progress", 10*time.Second, "interval to report progress, ex: 15s, 1m, 1h")
 	pflag.BoolVar(&fNoCheckCertificates, "no-check-certificates", false, "disable TLS certificate validation, exposes your credentials to anyone on the network")
 	pflag.DurationVar(&fMaxConnLifetime, "max-conn-lifetime", 1*time.Hour, "when connections are older than this, they are ejected from the connection pool")
+	pflag.BoolVar(&fDriverDebugLogging, "driver-debug-logging", false, "enable debug-level logging for the underlying neo4j driver")
 }
 
 func main() {
@@ -112,6 +114,9 @@ Options:
 	driver, err := neobench.NewDriver(fAddress, fUser, fPassword, encryptionMode, !fNoCheckCertificates, func(c *neo4j.Config) {
 		c.UserAgent = "neobench"
 		c.MaxConnectionLifetime = fMaxConnLifetime
+		if fDriverDebugLogging {
+			c.Log = neo4j.ConsoleLogger(neo4j.DEBUG)
+		}
 	})
 	if err != nil {
 		log.Fatal(err)
