@@ -1,5 +1,7 @@
 # Neobench builtin workloads
 
+([Back to docs overview](overview.md))
+
 Neobench includes two built-in workloads. 
 They are defined by `Scripts` like any other workload, you can see their definitions [here](../pkg/neobench/builtin/ldbc_like.go) and [here](../pkg/neobench/builtin/tpcb_like.go).
 

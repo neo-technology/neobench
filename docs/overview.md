@@ -11,6 +11,12 @@ Use cases include:
 - Explore the workload itself, testing how changing queries changes performance
 - Optimize neo4j code for a given workload
 
+## Contents
+
+- Overview (this page): Basics, mental model of how neobench works, flags documentation
+- [Builtin Workloads](builtin.md): Description of the two built-in workloads
+- [Custom Scripts](scripts.md): How to write custom workloads using the scripting language
+
 ## Basic usage
 
 The following neobench invocation will run the built-in TPC-B-like benchmark, including populating the dataset, for one minute.
