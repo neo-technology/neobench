@@ -103,12 +103,15 @@ const ldbcNumTagClasses = int64(71)
 // distributions. It is *not* LDBC, but it is intended as a proxy for it. Ideally, if you have a setup that
 // works well with this benchmark, it'd also do well in the real LDBC benchmark.
 //
-// The primary thing you get here is a dataset that can have load generated against it without coordination;
-// names and identities are deterministically generated for a given seed and scale.
-//
 // The generation works by first populating the static portion - places, tags etc - and then simulating
 // ten years worth of activity in the social network, with users joining over time, creating new forums,
 // forming new friendships and so on.
+//
+// The end result is a dataset that:
+//
+// - Was populated "naturally", with data fragmented and inserted piecewise the same a real dataset is
+// - Has deterministic identifiers, allowing the load gen portion to generate random load without lookups in the db
+//
 func InitLDBCLike(scale, seed int64, dbName string, driver neo4j.Driver, out neobench.Output) error {
 	numPeople := 9892 * scale
 
@@ -287,7 +290,8 @@ func InitLDBCLike(scale, seed int64, dbName string, driver neo4j.Driver, out neo
 		tries := 0
 		for {
 			friendId = random.Intn(peopleCreated) + 1
-			if !friends.contains(actor, friendId) {
+			// Stop searching if we find another :Person that we're not yet friends with
+			if friendId != actor && !friends.contains(actor, friendId) {
 				break
 			}
 			tries += 1
@@ -387,6 +391,13 @@ func InitLDBCLike(scale, seed int64, dbName string, driver neo4j.Driver, out neo
 			return nil
 		}
 
+		// This is the primary query we use for inserts; it's engineered to allow large batches to be sent over
+		// and committed in bulk. Each action *type* has a CALL block, and inside each such block we go through
+		// all the actions, filter by the action type the current CALL block knows about, and performs it.
+		// There are issues with this approach - most notably that the actions lose their ordering within the batch,
+		// as they end up executed by type rather than sequence.
+		// We might look at improving this query to try to work around that. Also it's still a major bottleneck for
+		// dataset population, even SF001 takes several minutes to do.
 		_, err := session.WriteTransaction(func(tx neo4j.Transaction) (interface{}, error) {
 			q := `
 MERGE (meta:__NEOBENCH_META__)
@@ -395,99 +406,7 @@ WITH 1 AS row LIMIT 1
 
 UNWIND $actions as action
 
-CALL {
-  WITH action
-  UNWIND CASE action.type WHEN 'cf' THEN [1] ELSE [] END AS i
-
-  MATCH (p:Person {id: action.personId})
-  MERGE (f:Forum {id: action.forumId})
-  ON CREATE SET f.title = action.title, f.creationDate = action.now
-  MERGE (f)-[:HAS_MODERATOR]->(p)
-  MERGE (f)-[:HAS_MEMBER {joinDate: action.now}]->(p)
-  WITH action, f
-  UNWIND action.tags as tag 
-  MATCH (t:Tag {name:tag})
-  MERGE (f)-[:HAS_TAG]->(t)
-  RETURN COUNT(*) AS createForumCount
-}
-
-CALL {
-  WITH action
-  UNWIND CASE action.type WHEN 'af' THEN [1] ELSE [] END AS i
-
-  MATCH (p:Person {id: action.personId}), (f:Person {id: action.friendId})
-  MERGE (m)<-[:KNOWS {creationDate: action.now}]-(f)
-  RETURN COUNT(*) AS addFriendCount
-}
-
-CALL {
-  WITH action
-  UNWIND CASE action.type WHEN 'p' THEN [1] ELSE [] END AS i
-
-  MATCH (p:Person {id: action.personId}), (f:Forum {id: action.forumId})
-  CREATE (m:Message:Post {
-    id: action.messageId,
-    creationDate: action.now,
-    browserUsed: action.browserUsed,
-    locationIP: action.locationIP,
-    content: action.content,
-    length: action.length,
-    language: action.language,
-    imageFile: action.imageFile
-  })
-  CREATE (f)-[:CONTAINER_OF]->(m)
-  CREATE (m)-[:HAS_CREATOR]->(p)
-  WITH action, m
-  UNWIND action.tags as tag 
-  MATCH (t:Tag {name:tag})
-  CREATE (m)-[:HAS_TAG]->(t)
-
-  RETURN COUNT(*) AS createPostCount
-}
-
-CALL {
-  WITH action
-  UNWIND CASE action.type WHEN 'jf' THEN [1] ELSE [] END AS i
-
-  MATCH (p:Person {id: action.personId}), (f:Forum {id: action.forumId})
-  MERGE (p)<-[:HAS_MEMBER {joinDate: action.now}]-(f)
-
-  RETURN COUNT(*) AS joinForumCount
-}
-
-CALL {
-  WITH action
-  UNWIND CASE action.type WHEN 'c' THEN [1] ELSE [] END AS i
-
-  MATCH (p:Person {id: action.personId}), (parent:Message {id: action.parentId})
-  CREATE (c:Message:Comment {
-    id: action.messageId,
-    creationDate: action.now,
-    browserUsed: action.browserUsed,
-    locationIP: action.locationIP,
-    content: action.content,
-    length: action.length
-  })
-  CREATE (c)-[:REPLY_OF]->(parent)
-  CREATE (c)-[:HAS_CREATOR]->(p)
-  WITH action, c
-  UNWIND action.tags as tag 
-  MATCH (t:Tag {name:tag})
-  CREATE (c)-[:HAS_TAG]->(t)
-
-  RETURN COUNT(*) AS commentCount
-}
-
-CALL {
-  WITH action
-  UNWIND CASE action.type WHEN 'l' THEN [1] ELSE [] END AS i
-
-  MATCH (p:Person {id: action.personId}), (msg:Message {id: action.messageId})
-  CREATE (p)-[:LIKES {creationDate: action.now}]->(msg)
-
-  RETURN COUNT(*) AS likeCount
-}
-
+// Do CreatePerson action
 CALL {
   WITH action
   UNWIND CASE action.type WHEN 'cp' THEN [1] ELSE [] END AS i
@@ -524,6 +443,105 @@ CALL {
   CREATE (p)-[:STUDY_AT {classYear: university.classYear}]->(u)
 
   RETURN COUNT(*) AS createPersonCount
+}
+
+// Do AddFriend actions
+CALL {
+  WITH action
+  UNWIND CASE action.type WHEN 'af' THEN [1] ELSE [] END AS i
+
+  MATCH (p:Person {id: action.personId}), (f:Person {id: action.friendId})
+  MERGE (p)<-[:KNOWS {creationDate: action.now}]-(f)
+  RETURN COUNT(*) AS addFriendCount
+}
+
+// Do CreateForum actions
+CALL {
+  WITH action
+  UNWIND CASE action.type WHEN 'cf' THEN [1] ELSE [] END AS i
+
+  MATCH (p:Person {id: action.personId})
+  MERGE (f:Forum {id: action.forumId})
+  ON CREATE SET f.title = action.title, f.creationDate = action.now
+  MERGE (f)-[:HAS_MODERATOR]->(p)
+  MERGE (f)-[:HAS_MEMBER {joinDate: action.now}]->(p)
+  WITH action, f
+  UNWIND action.tags as tag 
+  MATCH (t:Tag {name:tag})
+  MERGE (f)-[:HAS_TAG]->(t)
+  RETURN COUNT(*) AS createForumCount
+}
+
+// Do Post actions
+CALL {
+  WITH action
+  UNWIND CASE action.type WHEN 'p' THEN [1] ELSE [] END AS i
+
+  MATCH (p:Person {id: action.personId}), (f:Forum {id: action.forumId})
+  CREATE (m:Message:Post {
+    id: action.messageId,
+    creationDate: action.now,
+    browserUsed: action.browserUsed,
+    locationIP: action.locationIP,
+    content: action.content,
+    length: action.length,
+    language: action.language,
+    imageFile: action.imageFile
+  })
+  CREATE (f)-[:CONTAINER_OF]->(m)
+  CREATE (m)-[:HAS_CREATOR]->(p)
+  WITH action, m
+  UNWIND action.tags as tag 
+  MATCH (t:Tag {name:tag})
+  CREATE (m)-[:HAS_TAG]->(t)
+
+  RETURN COUNT(*) AS createPostCount
+}
+
+// Do JoinForum actions
+CALL {
+  WITH action
+  UNWIND CASE action.type WHEN 'jf' THEN [1] ELSE [] END AS i
+
+  MATCH (p:Person {id: action.personId}), (f:Forum {id: action.forumId})
+  MERGE (p)<-[:HAS_MEMBER {joinDate: action.now}]-(f)
+
+  RETURN COUNT(*) AS joinForumCount
+}
+
+// Do Comment Action
+CALL {
+  WITH action
+  UNWIND CASE action.type WHEN 'c' THEN [1] ELSE [] END AS i
+
+  MATCH (p:Person {id: action.personId}), (parent:Message {id: action.parentId})
+  CREATE (c:Message:Comment {
+    id: action.messageId,
+    creationDate: action.now,
+    browserUsed: action.browserUsed,
+    locationIP: action.locationIP,
+    content: action.content,
+    length: action.length
+  })
+  CREATE (c)-[:REPLY_OF]->(parent)
+  CREATE (c)-[:HAS_CREATOR]->(p)
+  WITH action, c
+  UNWIND action.tags as tag 
+  MATCH (t:Tag {name:tag})
+  CREATE (c)-[:HAS_TAG]->(t)
+
+  RETURN COUNT(*) AS commentCount
+}
+
+// Do Like action
+CALL {
+  WITH action
+  UNWIND CASE action.type WHEN 'l' THEN [1] ELSE [] END AS i
+
+  MATCH (p:Person {id: action.personId}), (msg:Message {id: action.messageId})
+  CREATE (p)-[:LIKES {creationDate: action.now}]->(msg)
+
+  RETURN COUNT(*) AS likeCount
 }
 
 RETURN COUNT(*) AS i
