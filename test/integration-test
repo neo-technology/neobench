@@ -5,9 +5,16 @@ shopt -s inherit_errexit
 
 [[ -n "${TRACE:-}" ]] && set -o xtrace
 
-trap 'stacktrace "Error trapped rc=${PIPESTATUS[@]}, see trace above"' ERR
+# Set this to have this PID killed on ERR
+CLEANUP_PID=""
 
-stacktrace() {
+trap 'cleanup "Error trapped rc=${PIPESTATUS[@]}, see trace above"' ERR
+
+cleanup() {
+  if [[ "${CLEANUP_PID}" != "" ]]; then
+    kill -9 "${CLEANUP_PID}" 2>/dev/null 1>&2 || true
+  fi
+  # Print stack trace
   local frame="${#FUNCNAME[@]}"
   echo >&2 "Stacktrace:"
   while [[ "${frame}" -gt 1 ]]; do
@@ -26,13 +33,14 @@ TEMP="${SCRIPTPATH}/../tmp/test"
 
 main() {
   mkdir -p "${TEMP}"
+  test_prometheus_output
   test_error_exit_codes
   test_tpcb_like
-  test_ldbc_like
   test_custom_script
   test_mixed_scripts
   test_named_database
   test_csv_parameter
+  #test_ldbc_like # TODO this is insanely slow.. can we run with a smaller --scale somehow?
 }
 
 test_tpcb_like() {
@@ -164,6 +172,47 @@ test_error_exit_codes() {
     echo >&2 "== /stdout+stderr =="
     exit 1
   fi
+}
+
+test_prometheus_output() {
+  local prometheus_metrics
+  local met_successful_tx_total met_failed_tx_total
+
+  echo "Running test_prometheus_output.."
+  setup_db
+
+  # Start neobench in the background, keep the PID
+  "${NEOBENCH_PATH}" --prometheus "localhost:8787" -p secret --script 'RETURN "Hello, world!"' -d 10m &
+  CLEANUP_PID="$!"
+
+  # Then, within some reasonable time, we should see prometheus metrics
+  local deadline
+  deadline="$(( SECONDS + 60 * 5))"
+  while true; do
+    sleep 5
+
+    if [[ "${SECONDS}" -gt "${deadline}" ]]; then
+      echo >&2 "[test_prometheus_output] expected prometheus metrics within 5 minutes"
+      exit 1
+    fi
+
+    if ! prometheus_metrics="$(curl http://localhost:8787/metrics 2>/dev/null |  grep -v '#')"; then
+      echo >&2 "[test_prometheus_output] Prometheus endpoint not yet responding.."
+      continue
+    fi
+
+    met_successful_tx_total="$(echo "${prometheus_metrics}" | grep "neobench_successful_transactions_total" | cut -d' ' -f2)"
+    if [[ "${met_successful_tx_total}" == "0" ]]; then
+      echo >&2 "[test_prometheus_output] neobench_successful_transactions_total not yet > 0.."
+      continue
+    fi
+
+    echo >&2 "[test_prometheus_output] all expected metrics present"
+    break
+  done
+
+  kill -9 "${CLEANUP_PID}" || true
+  CLEANUP_PID=""
 }
 
 setup_db() {
