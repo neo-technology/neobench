@@ -3,7 +3,12 @@ package neobench
 import (
 	"fmt"
 	"github.com/codahale/hdrhistogram"
+	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -103,41 +108,54 @@ type ScriptResult struct {
 type Output interface {
 	// scenario is a string describing the flags you'd need to pass to neobench to run an equivalent load
 	BenchmarkStart(databaseName, url, scenario string)
-	ReportProgress(report ProgressReport)
+	// Called if running in --init mode, eg. we are doing dataset population for one of the built-in workloads
+	ReportInitProgress(report ProgressReport)
+	// Called at interval set by --progress <interval>
 	ReportWorkloadProgress(completeness float64, checkpoint Result)
+	// Called at workload completion if running in Throughput mode; this is the final result
 	ReportThroughput(result Result)
+	// Called at workload completion if running in Latency mode; this is the final result
 	ReportLatency(result Result)
+	// Called if the workload or setup fails
 	Errorf(format string, a ...interface{})
 }
 
-func NewOutput(name string) (Output, error) {
+// Creates the output specified by name; if prometheusAddress is set, also starts
+// that as an output, returning an output that publishes to both
+// TODO(jake): Maybe this would be nicer with `name` a comma-separated list, eg. csv,prometheus
+func InitOutput(name, prometheusAddress string) (Output, error) {
 	if name == "auto" {
 		fi, _ := os.Stdout.Stat()
 		if fi.Mode()&os.ModeCharDevice == 0 {
-			return &CsvOutput{
-				ErrStream: os.Stderr,
-				OutStream: os.Stdout,
-			}, nil
+			name = "csv"
 		} else {
-			return &InteractiveOutput{
-				ErrStream: os.Stderr,
-				OutStream: os.Stdout,
-			}, nil
+			name = "interactive"
 		}
 	}
+
+	var output Output
 	if name == "interactive" {
-		return &InteractiveOutput{
+		output = &InteractiveOutput{
 			ErrStream: os.Stderr,
 			OutStream: os.Stdout,
-		}, nil
-	}
-	if name == "csv" {
-		return &CsvOutput{
+		}
+	} else if name == "csv" {
+		output = &CsvOutput{
 			ErrStream: os.Stderr,
 			OutStream: os.Stdout,
-		}, nil
+		}
+	} else {
+		return nil, fmt.Errorf("unknown output format: %s, supported formats are 'auto', 'interactive' and 'csv'", name)
 	}
-	return nil, fmt.Errorf("unknown output format: %s, supported formats are 'auto', 'interactive' and 'csv'", name)
+
+	if prometheusAddress != "" {
+		InitPrometheus(prometheusAddress)
+		output = &CombinedOutput{
+			delegates: []Output{output, NewPrometheusOutput()},
+		}
+	}
+
+	return output, nil
 }
 
 type InteractiveOutput struct {
@@ -167,7 +185,7 @@ func (o *InteractiveOutput) ReportWorkloadProgress(completeness float64, checkpo
 	}
 }
 
-func (o *InteractiveOutput) ReportProgress(report ProgressReport) {
+func (o *InteractiveOutput) ReportInitProgress(report ProgressReport) {
 	now := time.Now()
 	if report.Section == o.LastProgressReport.Section && report.Step == o.LastProgressReport.Step && now.Sub(o.LastProgressTime).Seconds() < 10 {
 		return
@@ -297,7 +315,7 @@ func (o *CsvOutput) BenchmarkStart(databaseName, url, scenario string) {
 	}
 }
 
-func (o *CsvOutput) ReportProgress(report ProgressReport) {
+func (o *CsvOutput) ReportInitProgress(report ProgressReport) {
 	now := time.Now()
 	if report.Section == o.LastProgressReport.Section && report.Step == o.LastProgressReport.Step && now.Sub(o.LastProgressTime).Seconds() < 10 {
 		return
@@ -432,3 +450,97 @@ func (o *CsvOutput) Errorf(format string, a ...interface{}) {
 		panic(err)
 	}
 }
+
+// Call once at app init; starts the prometheus http endpoint
+func InitPrometheus(addr string) {
+	http.Handle("/metrics", promhttp.Handler())
+	go func() {
+		err := http.ListenAndServe(addr, nil)
+		if err != nil {
+			panic(errors.Wrap(err, "prometheus http server failed"))
+		}
+	}()
+}
+
+type PrometheusOutput struct {
+	totalSucceededCounter prometheus.Counter
+	totalFailedCounter    prometheus.Counter
+}
+
+func NewPrometheusOutput() *PrometheusOutput {
+	return &PrometheusOutput{
+		totalSucceededCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "neobench_successful_transactions_total",
+			Help: "The total number of successful transactions",
+		}),
+		totalFailedCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "neobench_failed_transactions_total",
+			Help: "The total number of failed transactions",
+		}),
+	}
+}
+
+func (p *PrometheusOutput) BenchmarkStart(databaseName, url, scenario string) {
+}
+
+func (p *PrometheusOutput) ReportInitProgress(report ProgressReport) {
+}
+
+func (p *PrometheusOutput) ReportWorkloadProgress(completeness float64, checkpoint Result) {
+	p.totalSucceededCounter.Add(float64(checkpoint.TotalSucceeded()))
+	p.totalFailedCounter.Add(float64(checkpoint.TotalFailed()))
+}
+
+func (p *PrometheusOutput) ReportThroughput(result Result) {
+}
+
+func (p *PrometheusOutput) ReportLatency(result Result) {
+}
+
+func (p *PrometheusOutput) Errorf(format string, a ...interface{}) {
+}
+
+var _ Output = &PrometheusOutput{}
+
+// Combines multiple output mechanisms; we use this to eg. both write to stdout and publish to prometheus
+type CombinedOutput struct {
+	delegates []Output
+}
+
+func (c *CombinedOutput) BenchmarkStart(databaseName, url, scenario string) {
+	for _, d := range c.delegates {
+		d.BenchmarkStart(databaseName, url, scenario)
+	}
+}
+
+func (c *CombinedOutput) ReportInitProgress(report ProgressReport) {
+	for _, d := range c.delegates {
+		d.ReportInitProgress(report)
+	}
+}
+
+func (c *CombinedOutput) ReportWorkloadProgress(completeness float64, checkpoint Result) {
+	for _, d := range c.delegates {
+		d.ReportWorkloadProgress(completeness, checkpoint)
+	}
+}
+
+func (c *CombinedOutput) ReportThroughput(result Result) {
+	for _, d := range c.delegates {
+		d.ReportThroughput(result)
+	}
+}
+
+func (c *CombinedOutput) ReportLatency(result Result) {
+	for _, d := range c.delegates {
+		d.ReportLatency(result)
+	}
+}
+
+func (c *CombinedOutput) Errorf(format string, a ...interface{}) {
+	for _, d := range c.delegates {
+		d.Errorf(format, a)
+	}
+}
+
+var _ Output = &CombinedOutput{}
