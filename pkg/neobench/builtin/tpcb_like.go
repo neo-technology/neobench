@@ -36,7 +36,7 @@ func InitTPCBLike(scale int64, dbName string, driver neo4j.Driver, out neobench.
 	})
 	defer session.Close()
 
-	out.ReportProgress(neobench.ProgressReport{
+	out.ReportInitProgress(neobench.ProgressReport{
 		Section:      "init",
 		Step:         "create schema",
 		Completeness: 0,
@@ -51,7 +51,7 @@ func InitTPCBLike(scale int64, dbName string, driver neo4j.Driver, out neobench.
 		return err
 	}
 
-	out.ReportProgress(neobench.ProgressReport{
+	out.ReportInitProgress(neobench.ProgressReport{
 		Section:      "init",
 		Step:         "create branches & tellers",
 		Completeness: 0,
@@ -74,7 +74,7 @@ MERGE (t:Teller {tid: tellerId}) SET t.balance = 0
 		return err
 	}
 
-	out.ReportProgress(neobench.ProgressReport{
+	out.ReportInitProgress(neobench.ProgressReport{
 		Section:      "init",
 		Step:         "create accounts",
 		Completeness: 0,
@@ -104,7 +104,7 @@ CREATE (a:Account {aid: accountId, balance: 0})
 		if err != nil {
 			return err
 		}
-		out.ReportProgress(neobench.ProgressReport{
+		out.ReportInitProgress(neobench.ProgressReport{
 			Section:      "init",
 			Step:         "create accounts",
 			Completeness: float64(batchNo) / float64(numBatches),

@@ -137,7 +137,7 @@ func InitLDBCLike(scale, seed int64, dbName string, driver neo4j.Driver, out neo
 		existingScale := result.Record().Values[3].(int64)
 
 		if existingScale == scale && existingCompleted {
-			out.ReportProgress(neobench.ProgressReport{
+			out.ReportInitProgress(neobench.ProgressReport{
 				Section:      "init",
 				Step:         "dataset already populated",
 				Completeness: 1,
@@ -169,7 +169,7 @@ func InitLDBCLike(scale, seed int64, dbName string, driver neo4j.Driver, out neo
 
 	// Dynamic graph portion
 
-	out.ReportProgress(neobench.ProgressReport{
+	out.ReportInitProgress(neobench.ProgressReport{
 		Section:      "init",
 		Step:         "simulating dynamic content creation",
 		Completeness: 0,
@@ -610,7 +610,7 @@ RETURN COUNT(*) AS i
 				}
 				actions = actions[:0]
 			}
-			out.ReportProgress(neobench.ProgressReport{
+			out.ReportInitProgress(neobench.ProgressReport{
 				Section:      "init",
 				Step:         "simulating dynamic content creation",
 				Completeness: float64(actionsTaken) / float64(estTotalActions),
@@ -805,7 +805,7 @@ func createLDBCPerson(random *rand.Rand, personNo int, creationDate time.Time, n
 
 func ldbcInitStaticData(random *rand.Rand, session neo4j.Session, out neobench.Output) error {
 	// Schema
-	out.ReportProgress(neobench.ProgressReport{
+	out.ReportInitProgress(neobench.ProgressReport{
 		Section:      "init",
 		Step:         "create static graph portion",
 		Completeness: 0,

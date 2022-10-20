@@ -34,6 +34,7 @@ var fBuiltinWorkloads []string
 var fWorkloadFiles []string
 var fWorkloadScripts []string
 var fOutputFormat string
+var fPrometheusAddr string
 var fNoCheckCertificates bool
 var fDriverDebugLogging bool
 var fMaxConnLifetime time.Duration
@@ -62,6 +63,7 @@ func init() {
 	pflag.BoolVar(&fNoCheckCertificates, "no-check-certificates", false, "disable TLS certificate validation, exposes your credentials to anyone on the network")
 	pflag.DurationVar(&fMaxConnLifetime, "max-conn-lifetime", 1*time.Hour, "when connections are older than this, they are ejected from the connection pool")
 	pflag.BoolVar(&fDriverDebugLogging, "driver-debug-logging", false, "enable debug-level logging for the underlying neo4j driver")
+	pflag.StringVar(&fPrometheusAddr, "prometheus", "", "enable prometheus metrics at this host:port, ex: localhost:1234, :1234")
 }
 
 func main() {
@@ -89,7 +91,7 @@ Options:
 	seed := time.Now().Unix()
 	scenario := describeScenario()
 
-	out, err := neobench.NewOutput(fOutputFormat)
+	out, err := neobench.InitOutput(fOutputFormat, fPrometheusAddr)
 	if err != nil {
 		log.Fatal(err)
 	}
