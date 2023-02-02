@@ -26,13 +26,6 @@ type Worker struct {
 // If numTransactions is 0, we go until stopCh tells us to stop
 func (w *Worker) RunBenchmark(wrk ClientWorkload, databaseName string, transactionRate time.Duration,
 	numTransactions uint64, stopCh <-chan struct{}, recorder *ResultRecorder) WorkerResult {
-	session := w.driver.NewSession(neo4j.SessionConfig{
-		AccessMode:   neo4j.AccessModeWrite,
-		DatabaseName: databaseName,
-		Bookmarks:    nil,
-		FetchSize:    neo4j.FetchAll,
-	})
-	defer session.Close()
 
 	workStartTime := w.now()
 	recorder.totalStart = workStartTime
@@ -54,7 +47,14 @@ func (w *Worker) RunBenchmark(wrk ClientWorkload, databaseName string, transacti
 			return WorkerResult{WorkerId: w.workerId, Error: err}
 		}
 
+		session := w.driver.NewSession(neo4j.SessionConfig{
+			AccessMode:   neo4j.AccessModeWrite,
+			DatabaseName: databaseName,
+			Bookmarks:    nil,
+			FetchSize:    neo4j.FetchAll,
+		})
 		outcome := w.runUnit(session, uow)
+		session.Close()
 
 		uowLatency := w.now().Sub(nextStart)
 
