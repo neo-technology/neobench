@@ -1,9 +1,10 @@
 package builtin
 
 import (
-	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
 	"math"
 	"neobench/pkg/neobench"
+
+	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
 )
 
 const TPCBLike = `
@@ -26,7 +27,7 @@ const MatchOnly = `
 MATCH (account:Account {aid:$aid}) RETURN account.balance;
 `
 
-func InitTPCBLike(scale int64, dbName string, driver neo4j.Driver, out neobench.Output) error {
+func InitTPCBLike(scale int64, dbName string, driver neo4j.Driver, out neobench.Output, version string) error {
 	numBranches := 1 * scale
 	numTellers := 10 * scale
 	numAccounts := 100000 * scale
@@ -46,7 +47,7 @@ func InitTPCBLike(scale int64, dbName string, driver neo4j.Driver, out neobench.
 		{Label: "Branch", Property: "bid", Unique: true},
 		{Label: "Teller", Property: "tid", Unique: true},
 		{Label: "Account", Property: "aid", Unique: true},
-	})
+	}, version)
 	if err != nil {
 		return err
 	}

@@ -2,11 +2,13 @@ package builtin
 
 import (
 	"fmt"
-	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
-	"github.com/pkg/errors"
 	"math/rand"
 	"neobench/pkg/neobench"
+	"strings"
 	"time"
+
+	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
+	"github.com/pkg/errors"
 )
 
 const LDBCIC2 = `
@@ -111,8 +113,7 @@ const ldbcNumTagClasses = int64(71)
 //
 // - Was populated "naturally", with data fragmented and inserted piecewise the same a real dataset is
 // - Has deterministic identifiers, allowing the load gen portion to generate random load without lookups in the db
-//
-func InitLDBCLike(scale, seed int64, dbName string, driver neo4j.Driver, out neobench.Output) error {
+func InitLDBCLike(scale, seed int64, dbName string, driver neo4j.Driver, out neobench.Output, version string) error {
 	numPeople := 9892 * scale
 
 	now := time.Date(ldbcStartYear, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -156,7 +157,7 @@ func InitLDBCLike(scale, seed int64, dbName string, driver neo4j.Driver, out neo
 
 	if preExistingActions == 0 {
 		initRandom := rand.New(rand.NewSource(seed + 1337))
-		if err := ldbcInitStaticData(initRandom, session, out); err != nil {
+		if err := ldbcInitStaticData(initRandom, session, out, version); err != nil {
 			return err
 		}
 	}
@@ -803,7 +804,7 @@ func createLDBCPerson(random *rand.Rand, personNo int, creationDate time.Time, n
 	}
 }
 
-func ldbcInitStaticData(random *rand.Rand, session neo4j.Session, out neobench.Output) error {
+func ldbcInitStaticData(random *rand.Rand, session neo4j.Session, out neobench.Output, version string) error {
 	// Schema
 	out.ReportInitProgress(neobench.ProgressReport{
 		Section:      "init",
@@ -828,7 +829,7 @@ func ldbcInitStaticData(random *rand.Rand, session neo4j.Session, out neobench.O
 		{Label: "Person", Property: "firstName", Unique: false},
 		{Label: "Person", Property: "lastName", Unique: false},
 		{Label: "Message", Property: "creationDate", Unique: false},
-	})
+	}, version)
 	if err != nil {
 		return errors.Wrapf(err, "failed to do schema setup")
 	}
@@ -999,8 +1000,8 @@ type schemaEntry struct {
 
 // Note that this function has injection vulnerabilities, do not call with untrusted label or prop
 // This can be deleted if we drop support for Neo4j < 4.2
-func ensureSchema(session neo4j.Session, desiredSchema []schemaEntry) error {
-	actualSchema, err := listSchema(session)
+func ensureSchema(session neo4j.Session, desiredSchema []schemaEntry, version string) error {
+	actualSchema, err := listSchema(session, version)
 	if err != nil {
 		return errors.Wrapf(err, "failed to list existing schema")
 	}
@@ -1020,7 +1021,13 @@ func ensureSchema(session neo4j.Session, desiredSchema []schemaEntry) error {
 			continue
 		}
 		if desired.Unique {
-			err = runQ(session, fmt.Sprintf("CREATE CONSTRAINT ON (n:%s) ASSERT n.%s IS UNIQUE", desired.Label, desired.Property), nil)
+			var constraintQuery string
+			if strings.HasPrefix(version, "5") {
+				constraintQuery = fmt.Sprintf("CREATE CONSTRAINT FOR (n:%s) REQUIRE n.%s IS UNIQUE", desired.Label, desired.Property)
+			} else {
+				constraintQuery = fmt.Sprintf("CREATE CONSTRAINT ON (n:%s) ASSERT n.%s IS UNIQUE", desired.Label, desired.Property)
+			}
+			err = runQ(session, constraintQuery, nil)
 			if err != nil {
 				return errors.Wrapf(err, "failed to create uniqueness constraint on (:%s).%s", desired.Label, desired.Property)
 			}
@@ -1034,27 +1041,71 @@ func ensureSchema(session neo4j.Session, desiredSchema []schemaEntry) error {
 	return nil
 }
 
-func listSchema(session neo4j.Session) (out []schemaEntry, err error) {
-	res, err := session.Run("CALL db.indexes", nil)
+func listSchema(session neo4j.Session, version string) ([]schemaEntry, error) {
+	var res neo4j.Result
+	var err error
+
+	if strings.HasPrefix(version, "5.") {
+		res, err = session.Run("SHOW INDEXES", nil)
+	} else {
+		res, err = session.Run("CALL db.indexes", nil)
+	}
 	if err != nil {
 		return nil, err
 	}
 
+	var out []schemaEntry
 	for res.Next() {
-		rawUniqueness, _ := res.Record().Get("uniqueness")
-		uniqueness := rawUniqueness.(string)
+		var uniqueness string = "NONUNIQUE"
+		if strings.HasPrefix(version, "5.") {
+			rawName, _ := res.Record().Get("name")
+			params := map[string]interface{}{"name": rawName.(string)}
+			rawConstraintTypeRes, cstErr := session.Run("SHOW CONSTRAINTS YIELD name, type WHERE name = $name RETURN type", params)
+			if cstErr != nil {
+				return nil, cstErr
+			}
+			record, cstErr := rawConstraintTypeRes.Single()
+			if cstErr == nil {
+				rawConstraintType, _ := record.Get("type")
+
+				if rawConstraintType != nil {
+					if rawConstraintType.(string) == "UNIQUENESS" {
+						uniqueness = "UNIQUE"
+					} else {
+						uniqueness = "NONUNIQUE"
+					}
+				}
+			}
+		} else {
+			rawUniqueness, _ := res.Record().Get("uniqueness")
+
+			if rawUniqueness != nil {
+				uniqueness = rawUniqueness.(string)
+			}
+		}
+
 		rawLbls, _ := res.Record().Get("labelsOrTypes")
-		lbls := rawLbls.([]interface{})
+		var lbls []interface{}
+		if rawLbls != nil {
+			lbls = rawLbls.([]interface{})
+		}
 		rawProps, _ := res.Record().Get("properties")
-		props := rawProps.([]interface{})
+		var props []interface{}
+		if rawProps != nil {
+			props = rawProps.([]interface{})
+		}
 		if len(lbls) == 1 && len(props) == 1 {
 			existingLbl := lbls[0].(string)
 			existingProp := props[0].(string)
 			out = append(out, schemaEntry{existingLbl, existingProp, uniqueness == "UNIQUE"})
 		}
 	}
+	if err := res.Err(); err != nil {
 
-	return
+		return nil, err
+	}
+
+	return out, nil
 }
 
 func max(a, b int64) int64 {

@@ -3,9 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
-	"github.com/pkg/errors"
-	"github.com/spf13/pflag"
 	"io/ioutil"
 	"log"
 	"math/rand"
@@ -16,6 +13,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
+	"github.com/pkg/errors"
+	"github.com/spf13/pflag"
 )
 
 var fInitMode bool
@@ -145,8 +146,12 @@ Options:
 		log.Fatalf("%+v", err)
 	}
 
+	version, err := neo4jVersion(driver)
+	if err != nil {
+		log.Fatalf("%+v", err)
+	}
 	if fInitMode {
-		err = initWorkload(fBuiltinWorkloads, dbName, fScale, seed, driver, out)
+		err = initWorkload(fBuiltinWorkloads, dbName, fScale, seed, driver, out, version)
 		if err != nil {
 			log.Fatalf("%+v", err)
 		}
@@ -182,6 +187,21 @@ Options:
 			os.Exit(1)
 		}
 	}
+}
+
+func neo4jVersion(driver neo4j.Driver) (string, error) {
+	session := driver.NewSession(neo4j.SessionConfig{})
+	defer session.Close()
+	res, err := session.Run("CALL dbms.components() YIELD name,versions WHERE name=\"Neo4j Kernel\" RETURN versions[0] AS version, name LIMIT 1", nil)
+	if err != nil {
+		return "", err
+	}
+	record, err := res.Single()
+	if err != nil {
+		return "", err
+	}
+	rawVersion, _ := record.Get("version")
+	return rawVersion.(string), nil
 }
 
 func createWorkload(driver neo4j.Driver, dbName string, variables map[string]interface{}, seed int64) (neobench.Workload, error) {
@@ -223,8 +243,9 @@ func createWorkload(driver neo4j.Driver, dbName string, variables map[string]int
 }
 
 // Splits command-line specified scripts-with-weight into script and weight
-//   -f my.script@100 becomes "myscript", 100.0
-//   -b tpcb-like@10 becomes "tpcb-like", 10.0
+//
+//	-f my.script@100 becomes "myscript", 100.0
+//	-b tpcb-like@10 becomes "tpcb-like", 10.0
 func splitScriptAndWeight(raw string) (string, float64) {
 	parts := strings.Split(raw, "@")
 	if len(parts) < 2 {
@@ -405,16 +426,16 @@ func collectResults(databaseName, scenario string, out neobench.Output, concurre
 	return total, nil
 }
 
-func initWorkload(paths []string, dbName string, scale, seed int64, driver neo4j.Driver, out neobench.Output) error {
+func initWorkload(paths []string, dbName string, scale, seed int64, driver neo4j.Driver, out neobench.Output, version string) error {
 	for _, path := range paths {
 		if path == "tpcb-like" {
-			return builtin.InitTPCBLike(scale, dbName, driver, out)
+			return builtin.InitTPCBLike(scale, dbName, driver, out, version)
 		}
 		if path == "match-only" {
-			return builtin.InitTPCBLike(scale, dbName, driver, out)
+			return builtin.InitTPCBLike(scale, dbName, driver, out, version)
 		}
 		if path == "ldbc-like" {
-			return builtin.InitLDBCLike(scale, seed, dbName, driver, out)
+			return builtin.InitLDBCLike(scale, seed, dbName, driver, out, version)
 		}
 	}
 	return nil
