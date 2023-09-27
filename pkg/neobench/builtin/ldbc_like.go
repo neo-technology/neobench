@@ -82,9 +82,9 @@ RETURN
  [n IN nodes(path) | n.id] AS pathNodeIds,
  reduce(weight=0.0, r IN relationships(path) |
             weight +
-            size(()-[r]->()<-[:HAS_CREATOR]-(:Comment)-[:REPLY_OF]->(:Post)-[:HAS_CREATOR]->()-[r]->())*1.0 +
-            size(()<-[r]-()<-[:HAS_CREATOR]-(:Comment)-[:REPLY_OF]->(:Post)-[:HAS_CREATOR]->()<-[r]-())*1.0 +
-            size(()<-[r]-()-[:HAS_CREATOR]-(:Comment)-[:REPLY_OF]-(:Comment)-[:HAS_CREATOR]-()<-[r]-())*0.5
+            count{()-[r]->()<-[:HAS_CREATOR]-(:Comment)-[:REPLY_OF]->(:Post)-[:HAS_CREATOR]->()-[r]->()}*1.0 +
+            count{()<-[r]-()<-[:HAS_CREATOR]-(:Comment)-[:REPLY_OF]->(:Post)-[:HAS_CREATOR]->()<-[r]-()}*1.0 +
+            count{()<-[r]-()-[:HAS_CREATOR]-(:Comment)-[:REPLY_OF]-(:Comment)-[:HAS_CREATOR]-()<-[r]-()}*0.5
  ) AS weight
 ORDER BY weight DESC;
 `
